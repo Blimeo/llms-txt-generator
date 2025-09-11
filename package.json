@@ -5,6 +5,7 @@
     "build": "turbo run build",
     "dev": "turbo run dev",
     "lint": "turbo run lint",
+    "test": "turbo run test",
     "check-types": "turbo run check-types",
     "format": "prettier --write \"**/*.{ts,tsx,md}\""
   },
@@ -14,11 +15,14 @@
     "turbo": "^2.5.6"
   },
   "engines": {
-    "node": ">=18"
+    "node": "22.x"
   },
-  "packageManager": "bun@1.2.21",
+  "packageManager": "npm@11.5.1",
   "workspaces": [
     "apps/*",
     "packages/*"
-  ]
+  ],
+  "dependencies": {
+    "tsx": "^4.20.5"
+  }
 }

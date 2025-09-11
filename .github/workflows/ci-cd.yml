@@ -1,0 +1,109 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write # required for OIDC auth (if you use it)
+  packages: write
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [22]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install dependencies (root)
+        run: |
+          npm ci
+
+      - name: Run build (monorepo)
+        run: |
+          npm run build
+
+      - name: Run tests
+        run: |
+          npm test
+
+  deploy-web:
+    needs: build-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install & build web (apps/web)
+        run: |
+          npm ci
+          npm run build
+          cd apps/web
+          npm run build
+
+      - name: Deploy to Vercel
+        uses: amondnet/vercel-action@v20
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+
+  deploy-worker:
+    needs: build-test
+    runs-on: ubuntu-latest
+    env:
+      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ secrets.GCP_REGION }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up gcloud (Service Account key or OIDC)
+        id: auth
+        uses: google-github-actions/auth@v1
+        with:
+          # Option A (service account JSON key):
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          # Option B (OIDC): uncomment both lines below and set corresponding secrets
+          # workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          # service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Configure gcloud
+        run: |
+          gcloud --quiet config set project $GCP_PROJECT_ID
+          gcloud --quiet config set run/region $GCP_REGION
+
+      - name: Set SHORT_SHA env var
+        # Use GitHub-provided GITHUB_SHA env var and slice in bash
+        run: echo "SHORT_SHA=${GITHUB_SHA::8}" >> $GITHUB_ENV
+
+      - name: Build and push container
+        run: |
+          # Use Cloud Build to build and push image, tag with short SHA
+          IMAGE="gcr.io/${GCP_PROJECT_ID}/llms-worker:${SHORT_SHA}"
+          gcloud builds submit --tag "${IMAGE}" ./apps/worker
+
+      - name: Deploy to Cloud Run
+        run: |
+          IMAGE="gcr.io/${GCP_PROJECT_ID}/llms-worker:${SHORT_SHA}"
+          gcloud run deploy llms-worker \
+            --image "${IMAGE}" \
+            --platform managed \
+            --region "${GCP_REGION}" \
+            --allow-unauthenticated \
+            --set-env-vars NODE_ENV=production

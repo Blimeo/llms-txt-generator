@@ -1,4 +1,12 @@
-export default function HomePage() {
+import { createClient } from '../utils/supabase/client'
+import { cookies } from 'next/headers'
+
+export default async function HomePage() {
+  const cookieStore = await cookies()
+  const supabase = createClient(cookieStore)
+
+  const { data: todos } = await supabase.from('todos').select()
+
   return (
     <main className="p-8">
       <h1 className="text-2xl font-bold">LLMs.txt Generator</h1>
@@ -13,6 +21,7 @@ export default function HomePage() {
           Generate
         </button>
       </form>
+      
     </main>
   );
 }
