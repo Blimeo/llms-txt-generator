@@ -21,7 +21,15 @@ export default async function HomePage() {
           Generate
         </button>
       </form>
-      
+      {todos && (
+        <ul className="mt-6 space-y-2">
+          {todos.map((todo) => (
+            <li key={todo.id} className="border-b pb-2">
+              {todo.name}
+            </li>
+          ))}
+        </ul>
+      )}
     </main>
   );
 }
