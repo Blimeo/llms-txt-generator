@@ -1,0 +1,13 @@
+{
+  "name": "@blimeo/worker",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "//dev": "python python_worker.py",
+    "//start": "python python_worker.py",
+    "dev": "uv run worker.py",
+    "lint": "echo 'no lint configured for python'",
+    "docker:build": "docker build -t yourorg/worker:latest .",
+    "build": "echo 'no build for python worker'"
+  }
+}
