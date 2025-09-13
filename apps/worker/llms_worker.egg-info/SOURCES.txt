@@ -1,0 +1,11 @@
+README.md
+pyproject.toml
+llms_worker.egg-info/PKG-INFO
+llms_worker.egg-info/SOURCES.txt
+llms_worker.egg-info/dependency_links.txt
+llms_worker.egg-info/requires.txt
+llms_worker.egg-info/top_level.txt
+worker/__init__.py
+worker/crawler.py
+worker/llms_generator.py
+worker/storage.py

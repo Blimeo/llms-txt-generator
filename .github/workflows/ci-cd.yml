@@ -11,6 +11,14 @@ permissions:
   id-token: write # required for OIDC auth (if you use it)
   packages: write
 
+env:
+  # set these to match your GCP / Artifact Registry layout
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: ${{ secrets.GCP_REGION }}            # e.g. us-central1
+  REPOSITORY: ${{ secrets.ARTIFACT_REPOSITORY }} # e.g. worker-repo
+  SERVICE: llms-worker    # e.g. llms-worker
+  WORKER_DIR: apps/worker
+
 jobs:
   build-test:
     runs-on: ubuntu-latest
@@ -67,43 +75,49 @@ jobs:
   deploy-worker:
     needs: build-test
     runs-on: ubuntu-latest
-    env:
-      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-      GCP_REGION: ${{ secrets.GCP_REGION }}
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Set up gcloud (Service Account key or OIDC)
-        id: auth
+      # Authenticate to GCP using the service account key stored in a secret
+      - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v1
         with:
-          # Option A (service account JSON key):
           credentials_json: ${{ secrets.GCP_SA_KEY }}
-          # Option B (OIDC): uncomment both lines below and set corresponding secrets
-          # workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          # service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Configure gcloud
+      # Docker login to Artifact Registry (use the region-specific host)
+      - name: Docker login to Artifact Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.REGION }}-docker.pkg.dev
+          username: _json_key
+          password: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set image name
+        id: image
+        # run: |
+        #   IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE }}:${{ github.sha }}"
+        #   echo "image=${IMAGE}" >> $GITHUB_OUTPUT
         run: |
-          gcloud --quiet config set project $GCP_PROJECT_ID
-          gcloud --quiet config set run/region $GCP_REGION
+          IMAGE="us-central1-docker.pkg.dev/api-project-1042553923996/llms-txt-repo/llms-worker:${{ github.sha }}"
+          echo "image=${IMAGE}" >> $GITHUB_OUTPUT
 
-      - name: Set SHORT_SHA env var
-        # Use GitHub-provided GITHUB_SHA env var and slice in bash
-        run: echo "SHORT_SHA=${GITHUB_SHA::8}" >> $GITHUB_ENV
-
-      - name: Build and push container
-        run: |
-          # Use Cloud Build to build and push image, tag with short SHA
-          IMAGE="gcr.io/${GCP_PROJECT_ID}/llms-worker:${SHORT_SHA}"
-          gcloud builds submit --tag "${IMAGE}" ./apps/worker
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: ${{ env.WORKER_DIR }}
+          push: true
+          tags: ${{ steps.image.outputs.image }}
+          # Use buildx cache if desired, or remove the cache settings if not needed
 
       - name: Deploy to Cloud Run
-        run: |
-          IMAGE="gcr.io/${GCP_PROJECT_ID}/llms-worker:${SHORT_SHA}"
-          gcloud run deploy llms-worker \
-            --image "${IMAGE}" \
-            --platform managed \
-            --region "${GCP_REGION}" \
-            --allow-unauthenticated \
-            --set-env-vars NODE_ENV=production
+        id: deploy
+        uses: google-github-actions/deploy-cloudrun@v3
+        with:
+          service: ${{ env.SERVICE }}
+          region: ${{ env.REGION }}
+          image: ${{ steps.image.outputs.image }}
+          project_id: ${{ env.PROJECT_ID }}
+

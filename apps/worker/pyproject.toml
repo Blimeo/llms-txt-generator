@@ -1,13 +1,21 @@
 [project]
-name = "worker"
-version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
-requires-python = ">=3.13"
+name = "llms-worker"
+version = "0.0.0"
+description = "Python worker for llms.txt generation"
+authors = [{name="Your Name", email="you@example.com"}]
+requires-python = ">=3.11"
 dependencies = [
-    "beautifulsoup4>=4.13.5",
-    "lxml>=6.0.1",
-    "python-dotenv>=1.1.1",
-    "redis>=6.4.0",
-    "requests>=2.32.5",
+"redis >= 4.5.0",
+"python-dotenv >= 1.0.0",
+"requests >=2.31.0",
+"beautifulsoup4 >=4.12.2",
+"lxml >=4.9.3"
 ]
+
+[project.optional-dependencies]
+aws = ["boto3"]
+
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"

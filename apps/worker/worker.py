@@ -6,6 +6,11 @@ import time
 import traceback
 import logging
 from datetime import datetime
+import os
+import signal
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
 
 from redis import Redis
 from dotenv import load_dotenv
@@ -27,7 +32,50 @@ if not REDIS_URL:
 redis = Redis.from_url(REDIS_URL, decode_responses=True)
 QUEUE_NAME = "generate:queue"
 JOB_KEY_PREFIX = "job:"
+SHUTDOWN = False
 
+def start_health_server(port: int = 8080):
+    """
+    Runs a tiny HTTP server that responds 200 on / and /health.
+    Runs in a daemon thread so it won't block shutdown.
+    """
+
+    class HealthHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path in ("/", "/health", "/ready"):
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(b"OK")
+            else:
+                self.send_response(404)
+                self.end_headers()
+
+        # quiet the default logging
+        def log_message(self, format, *args):
+            return
+
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+
+    def serve():
+        try:
+            server.serve_forever()
+        except Exception:
+            pass
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    return server, thread
+
+def handle_termination(signum, frame):
+    global SHUTDOWN
+    SHUTDOWN = True
+    # Flask/uvicorn etc would need different handling; we use this flag in main loop.
+    logger.info("Received signal %s, shutting down...", signum)
+
+# Register signals
+signal.signal(signal.SIGTERM, handle_termination)
+signal.signal(signal.SIGINT, handle_termination)
 
 def set_job_hash(job_id, mapping):
     key = f"{JOB_KEY_PREFIX}{job_id}"
@@ -84,10 +132,16 @@ def process_job_payload(job: dict):
 
 
 def main():
+    port = int(os.environ.get("PORT", "8080"))
+    server, server_thread = start_health_server(port)
+    logger.info("health server listening on port %s", port)
+
     logger.info("python worker: listening for jobs on %s", QUEUE_NAME)
-    while True:
+    while not SHUTDOWN:
         try:
             item = redis.brpop(QUEUE_NAME, timeout=5)
+            if SHUTDOWN:
+                break
             if not item:
                 continue
             _, payload = item
@@ -129,7 +183,11 @@ def main():
         except Exception as e:
             logger.exception("Unexpected worker error: %s", e)
             time.sleep(2)
-
+    try:
+        server.shutdown()
+    except Exception:
+        pass
+    logger.info("worker exited cleanly")
 
 if __name__ == "__main__":
     main()
