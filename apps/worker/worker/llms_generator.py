@@ -5,10 +5,10 @@ from typing import Dict, Any, List
 import os
 
 
-def generate_llms_text(crawl_result: Dict[str, Any], job_id: str) -> str:
+def generate_llms_text(crawl_result: Dict[str, Any], job_id: str) -> tuple[str, str]:
     """
     Generate a textual artifact representing crawl results.
-    Returns path to the generated file (local path).
+    Returns tuple of (txt_content, json_content) as strings in memory.
     """
     now = datetime.utcnow().isoformat() + "Z"
     header = {
@@ -17,9 +17,6 @@ def generate_llms_text(crawl_result: Dict[str, Any], job_id: str) -> str:
         "start_url": crawl_result.get("start_url"),
         "pages_crawled": crawl_result.get("pages_crawled"),
     }
-
-    filename = f"llms_{job_id}.txt"
-    outpath = os.path.abspath(os.path.join(os.getcwd(), filename))
 
     lines = []
     lines.append("# llms.txt generated artifact")
@@ -47,13 +44,8 @@ def generate_llms_text(crawl_result: Dict[str, Any], job_id: str) -> str:
             lines.append(snippet)
         lines.append("")  # blank
 
-    # Also write a JSON variant for machine parsing
-    jsonpath = os.path.abspath(os.path.join(os.getcwd(), f"llms_{job_id}.json"))
-    with open(outpath, "w", encoding="utf-8") as fh:
-        fh.write("\n".join(lines))
+    # Generate content in memory
+    txt_content = "\n".join(lines)
+    json_content = json.dumps({"meta": header, "pages": pages}, indent=2, ensure_ascii=False)
 
-    with open(jsonpath, "w", encoding="utf-8") as fj:
-        json.dump({"meta": header, "pages": pages}, fj, indent=2, ensure_ascii=False)
-
-    # return both paths as a tuple or choose outpath
-    return outpath, jsonpath
+    return txt_content, json_content

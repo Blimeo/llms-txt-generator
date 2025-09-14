@@ -8,6 +8,9 @@ import requests
 from bs4 import BeautifulSoup
 from typing import Dict, Set, List, Optional, Any
 
+from .change_detection import ChangeDetector
+from .storage import get_supabase_client
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
@@ -131,8 +134,44 @@ def extract_text_and_meta(html: str, url: str) -> Dict[str, Any]:
     return {"title": title, "description": meta_desc, "headings": headings, "text_snippet": snippet, "full_text": text}
 
 
-def crawl(
+def _create_page_record(project_id: str, page_info: Dict) -> Optional[str]:
+    """Create a new page record in the database."""
+    try:
+        from .storage import get_supabase_client
+        from datetime import datetime
+        
+        supabase = get_supabase_client()
+        
+        page_data = {
+            'project_id': project_id,
+            'url': page_info['url'],
+            'path': page_info.get('path', '/'),
+            'canonical_url': page_info.get('canonical_url', page_info['url']),
+            'render_mode': page_info.get('render_mode', 'STATIC'),
+            'is_indexable': page_info.get('is_indexable', True),
+            'discovered_at': datetime.utcnow().isoformat(),
+            'metadata': page_info.get('metadata', {})
+        }
+        
+        result = supabase.table("pages").insert(page_data).execute()
+        
+        if result.data:
+            page_id = result.data[0]['id']
+            logger.info(f"Created new page record {page_id} for {page_info['url']}")
+            return page_id
+        else:
+            logger.error(f"Failed to create page record for {page_info['url']}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error creating page record for {page_info['url']}: {e}")
+        return None
+
+
+def crawl_with_change_detection(
     start_url: str,
+    project_id: str,
+    run_id: str,
     max_pages: int = 200,
     max_depth: int = 2,
     delay: float = 0.5,
@@ -140,101 +179,142 @@ def crawl(
     user_agent: str = DEFAULT_USER_AGENT,
 ) -> Dict[str, Any]:
     """
-    BFS crawl starting from start_url. Returns a dict with metadata and list of pages.
-    - respects same-domain by default
-    - respects robots.txt (best-effort)
-    - rate-limits by sleeping `delay` seconds between requests to the same domain
+    Crawl with change detection integration.
+    Only crawls pages that have changed or are new.
     """
     if session is None:
         session = requests.Session()
     session.headers.update({"User-Agent": user_agent})
 
-    parsed = urlparse(start_url)
-    base_domain = f"{parsed.scheme}://{parsed.netloc}"
-    robots = Robots(base_domain, session, user_agent=user_agent)
-
-    visited: Set[str] = set()
-    pages: List[Dict[str, Any]] = []
-    q = deque()
-    q.append((start_url, 0))
-
-    last_request_time_by_host: Dict[str, float] = {}
-
-    while q and len(pages) < max_pages:
-        url, depth = q.popleft()
-        if url in visited:
-            continue
-        if depth > max_depth:
-            continue
-        visited.add(url)
-
-        # check robots
-        path = urlparse(url).path or "/"
+    # Initialize change detector
+    change_detector = ChangeDetector(project_id, run_id)
+    
+    # Detect changes first
+    changes = change_detector.detect_changes(start_url)
+    
+    if not changes['has_changes']:
+        logger.info("No changes detected, skipping crawl")
+        return {
+            "start_url": start_url,
+            "pages_crawled": 0,
+            "max_pages": max_pages,
+            "max_depth": max_depth,
+            "pages": [],
+            "changes_detected": False,
+            "changed_pages": [],
+            "new_pages": [],
+            "unchanged_pages": changes['unchanged_pages']
+        }
+    
+    logger.info(f"Changes detected: {len(changes['changed_pages'])} changed, "
+               f"{len(changes['new_pages'])} new pages")
+    
+    # Crawl only changed and new pages
+    pages_to_crawl = changes['changed_pages'] + changes['new_pages']
+    crawled_pages = []
+    
+    for page_info in pages_to_crawl[:max_pages]:
+        url = page_info['url']
+        logger.info(f"Crawling changed/new page: {url}")
+        
         try:
-            if not robots.allows(path):
-                logger.info("robots.txt disallows %s", url)
-                continue
-        except Exception:
-            # if robots parsing fails, be permissive
-            pass
-
-        # respect rate limit per host
-        host = urlparse(url).netloc
-        last = last_request_time_by_host.get(host, 0)
-        since = time.time() - last
-        if since < delay:
-            to_wait = delay - since
-            time.sleep(to_wait)
-
-        # fetch
-        logger.info("fetching %s (depth=%s)", url, depth)
-        try:
+            # Fetch page
             r = session.get(url, timeout=15)
-            last_request_time_by_host[host] = time.time()
-        except Exception as e:
-            logger.warning("failed to fetch %s: %s", url, e)
-            continue
-
-        # check content-type
-        ctype = r.headers.get("Content-Type", "")
-        if not any(ct in ctype for ct in HTML_CONTENT_TYPES):
-            logger.info("skipping non-html %s (%s)", url, ctype)
-            continue
-
-        try:
+            if r.status_code != 200:
+                logger.warning(f"Failed to fetch {url}: {r.status_code}")
+                continue
+            
+            # Extract metadata
             data = extract_text_and_meta(r.text, url)
-        except Exception:
-            data = {"title": "", "description": "", "headings": [], "text_snippet": "", "full_text": ""}
-
-        # record page
-        pages.append(
-            {
-                "url": url,
-                "status_code": r.status_code,
-                "title": data["title"],
-                "description": data["description"],
-                "headings": data["headings"],
-                "snippet": data["text_snippet"],
-            }
-        )
-
-        # discover links (same-domain)
-        soup = BeautifulSoup(r.text, "lxml")
-        for a in soup.find_all("a", href=True):
-            normalized = normalize_url(url, a["href"])
-            if not normalized:
-                continue
-            if not is_same_domain(start_url, normalized):
-                continue
-            if normalized in visited:
-                continue
-            q.append((normalized, depth + 1))
-
+            
+            # Handle page creation/update
+            page_id = page_info.get('id')
+            old_revision_id = page_info.get('old_revision_id')
+            
+            if not page_id:
+                # This is a new page, we need to create it first
+                page_id = _create_page_record(project_id, page_info)
+                old_revision_id = None  # New page has no old revision
+            
+            if page_id:
+                # Save revision with full content and diff tracking
+                revision_id = change_detector.save_page_revision(
+                    page_id=page_id,
+                    content=r.text,
+                    title=data["title"],
+                    description=data["description"],
+                    metadata={
+                        "status_code": r.status_code,
+                        "etag": r.headers.get('ETag'),
+                        "last_modified": r.headers.get('Last-Modified'),
+                        "content_type": r.headers.get('Content-Type'),
+                        "content_length": r.headers.get('Content-Length'),
+                        "change_reason": page_info.get('change_reason', 'Unknown')
+                    },
+                    old_revision_id=old_revision_id
+                )
+                
+                if revision_id:
+                    # Add to crawled pages for result
+                    crawled_pages.append({
+                        "url": url,
+                        "status_code": r.status_code,
+                        "title": data["title"],
+                        "description": data["description"],
+                        "headings": data["headings"],
+                        "snippet": data["text_snippet"],
+                        "page_id": page_id,
+                        "revision_id": revision_id,
+                        "change_reason": page_info.get('change_reason', 'Unknown')
+                    })
+            
+            # Rate limiting
+            time.sleep(delay)
+            
+        except Exception as e:
+            logger.warning(f"Error crawling {url}: {e}")
+            continue
+    
     result = {
         "start_url": start_url,
-        "pages_crawled": len(pages),
+        "pages_crawled": len(crawled_pages),
         "max_pages": max_pages,
         "max_depth": max_depth,
-        "pages": pages,
+        "pages": crawled_pages,
+        "changes_detected": True,
+        "changed_pages": changes['changed_pages'],
+        "new_pages": changes['new_pages'],
+        "unchanged_pages": changes['unchanged_pages']
     }
+    
     return result
+
+
+def _create_page_record(project_id: str, page_info: Dict) -> Optional[str]:
+    """Create a new page record in the database."""
+    try:
+        supabase = get_supabase_client()
+        
+        page_data = {
+            "project_id": project_id,
+            "url": page_info["url"],
+            "path": page_info["path"],
+            "canonical_url": page_info.get("canonical_url"),
+            "render_mode": page_info.get("render_mode", "STATIC"),
+            "is_indexable": page_info.get("is_indexable", True),
+            "metadata": page_info.get("metadata", {})
+        }
+        
+        result = supabase.table("pages").insert(page_data).execute()
+        
+        if result.data:
+            page_id = result.data[0]["id"]
+            logger.info(f"Created page record {page_id} for {page_info['url']}")
+            return page_id
+        else:
+            logger.error(f"Failed to create page record for {page_info['url']}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error creating page record for {page_info['url']}: {e}")
+        return None

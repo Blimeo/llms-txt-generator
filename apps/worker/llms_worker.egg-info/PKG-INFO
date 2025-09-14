@@ -9,5 +9,5 @@ Requires-Dist: python-dotenv>=1.0.0
 Requires-Dist: requests>=2.31.0
 Requires-Dist: beautifulsoup4>=4.12.2
 Requires-Dist: lxml>=4.9.3
-Provides-Extra: aws
-Requires-Dist: boto3; extra == "aws"
+Requires-Dist: boto3
+Requires-Dist: supabase>=2.0.0

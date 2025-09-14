@@ -1,0 +1,13 @@
+{
+  "name": "@llmstxt/scheduler",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "uv run scheduler.py",
+    "build": "echo 'No build step required for Python service'",
+    "start": "uv run scheduler.py",
+    "test": "uv run tests/test_scheduler.py"
+  },
+  "devDependencies": {},
+  "dependencies": {}
+}

@@ -34,3 +34,14 @@ yarn-error.log*
 
 # ui
 dist/
+
+# Python-generated files
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.egg-info/
+.env
+
+# Virtual environments
+.venv/
