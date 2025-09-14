@@ -13,11 +13,11 @@ logger = logging.getLogger(__name__)
 
 def get_supabase_client() -> Client:
     """Get Supabase client using environment variables."""
-    url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")  # Use service role key for server-side operations
+    url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
+    key = os.environ.get("NEXT_PUBLIC_SUPABASE_ANON_KEY") 
     
     if not url or not key:
-        raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables are required")
+        raise ValueError("NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY environment variables are required")
     
     return create_client(url, key)
 
@@ -55,7 +55,7 @@ def maybe_upload_s3_from_memory(content: str, filename: str, run_id: str, projec
 
     s3_client = boto3.client(
         service_name ="s3",
-        endpoint_url = os.environ.get("AWS_S3_ENDPOINT"),
+        endpoint_url = f"https://{os.environ.get('SUPABASE_PROJECT_ID')}.supabase.co",
         aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
         aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
         region_name="us-west-1",
@@ -73,7 +73,9 @@ def maybe_upload_s3_from_memory(content: str, filename: str, run_id: str, projec
         **extra_args
     )
 
-    public_url = f"{os.environ.get("AWS_PUBLIC_S3_PREFIX")}/{bucket}/{key}"
+    # Construct Supabase storage URL using the project ID
+    supabase_project_id = os.environ.get("SUPABASE_PROJECT_ID")
+    public_url = f"https://{supabase_project_id}.supabase.co/storage/v1/object/public/{bucket}/{key}"
     logger.info(f"Uploaded to S3: {public_url}")
     
     # Get file size from content
