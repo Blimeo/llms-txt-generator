@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
-# apps/worker/python_worker.py
+# apps/worker/cloud_tasks_worker.py
 import os
 import json
-import time
 import traceback
 import logging
-from datetime import datetime
-import signal
-import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import urlparse, parse_qs
+import threading
 
-
-from redis import Redis
 from dotenv import load_dotenv
 
 # local worker modules
@@ -22,58 +18,53 @@ from worker.storage import maybe_upload_s3_from_memory, update_run_status
 load_dotenv()  # loads .env from repo root or apps/worker
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("python_worker")
+logger = logging.getLogger("cloud_tasks_worker")
 
-REDIS_URL="rediss://default:AfdjAAIncDE0MmZlMWViNTJkNWU0MzVjOGEzOTYwOWQyOTQyNzAyYnAxNjMzMzE@hip-lobster-63331.upstash.io:6379"
-if not REDIS_URL:
-    raise RuntimeError("Missing REDIS_URL env var")
-
-redis = Redis.from_url(REDIS_URL, decode_responses=True)
-QUEUE_NAME = "generate:queue"
-SHUTDOWN = False
-
-def start_health_server(port: int = 8080):
-    """
-    Runs a tiny HTTP server that responds 200 on / and /health.
-    Runs in a daemon thread so it won't block shutdown.
-    """
-
-    class HealthHandler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            if self.path in ("/", "/health", "/ready"):
-                self.send_response(200)
-                self.send_header("Content-Type", "text/plain; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(b"OK")
-            else:
-                self.send_response(404)
-                self.end_headers()
-
-        # quiet the default logging
-        def log_message(self, format, *args):
-            return
-
-    server = HTTPServer(("0.0.0.0", port), HealthHandler)
-
-    def serve():
+class CloudTasksHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        """Handle Cloud Tasks HTTP requests"""
         try:
-            server.serve_forever()
-        except Exception:
-            pass
+            # Get content length
+            content_length = int(self.headers.get('Content-Length', 0))
+            
+            # Read the request body
+            post_data = self.rfile.read(content_length)
+            
+            # Parse the job data from Cloud Tasks
+            job_data = json.loads(post_data.decode('utf-8'))
+            logger.info(f"Received Cloud Task: {job_data}")
+            
+            # Process the job
+            result = process_job_payload(job_data)
+            
+            # Send success response
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode('utf-8'))
+            
+        except Exception as e:
+            logger.exception(f"Error processing Cloud Task: {e}")
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            error_response = {"error": str(e)}
+            self.wfile.write(json.dumps(error_response).encode('utf-8'))
 
-    thread = threading.Thread(target=serve, daemon=True)
-    thread.start()
-    return server, thread
+    def do_GET(self):
+        """Health check endpoint"""
+        if self.path in ("/", "/health", "/ready"):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"OK")
+        else:
+            self.send_response(404)
+            self.end_headers()
 
-def handle_termination(signum, frame):
-    global SHUTDOWN
-    SHUTDOWN = True
-    # Flask/uvicorn etc would need different handling; we use this flag in main loop.
-    logger.info("Received signal %s, shutting down...", signum)
-
-# Register signals
-signal.signal(signal.SIGTERM, handle_termination)
-signal.signal(signal.SIGINT, handle_termination)
+    def log_message(self, format, *args):
+        """Suppress default logging"""
+        return
 
 
 
@@ -113,8 +104,6 @@ def process_job_payload(job: dict):
         logger.info("No changes detected, skipping llms.txt generation")
         update_run_status(run_id, "COMPLETE_NO_DIFFS", "No changes detected, skipping generation")
         return {
-            "txt_path": None,
-            "json_path": None,
             "s3_url_txt": None,
             "s3_url_json": None,
             "pages_crawled": 0,
@@ -138,8 +127,6 @@ def process_job_payload(job: dict):
     s3_url_json = maybe_upload_s3_from_memory(json_content, json_filename, run_id, project_id, changes_detected) if run_id and project_id else None
 
     result = {
-        "txt_path": None,  # No local files anymore
-        "json_path": None,  # No local files anymore
         "s3_url_txt": s3_url_txt,
         "s3_url_json": s3_url_json,
         "pages_crawled": crawl_result.get("pages_crawled"),
@@ -154,50 +141,23 @@ def process_job_payload(job: dict):
 
 def main():
     port = int(os.environ.get("PORT", "8080"))
-    server, server_thread = start_health_server(port)
-    logger.info("health server listening on port %s", port)
-
-    logger.info("python worker: listening for jobs on %s", QUEUE_NAME)
-    while not SHUTDOWN:
-        try:
-            item = redis.brpop(QUEUE_NAME, timeout=5)
-            if SHUTDOWN:
-                break
-            if not item:
-                continue
-            _, payload = item
-            job = json.loads(payload)
-            job_id = job.get("id")
-            if not job_id:
-                logger.warning("skipping job without id: %s", job)
-                continue
-
-            logger.info("picked job %s -> %s", job_id, job)
-
-            try:
-                result = process_job_payload(job)
-                logger.info("completed job %s -> %s", job_id, result)
-            except Exception as ex:
-                tb = traceback.format_exc()
-                logger.exception("job %s failed: %s", job_id, ex)
-                
-                # Update run status to FAILED if we have run_id
-                run_id = job.get("runId")
-                if run_id:
-                    update_run_status(run_id, "FAILED", str(ex))
-                
-                # optionally implement retry logic here (requeue, backoff)
-        except KeyboardInterrupt:
-            logger.info("Worker shutting down (KeyboardInterrupt)")
-            break
-        except Exception as e:
-            logger.exception("Unexpected worker error: %s", e)
-            time.sleep(2)
+    
+    # Start HTTP server for Cloud Tasks
+    server = HTTPServer(("0.0.0.0", port), CloudTasksHandler)
+    logger.info("Cloud Tasks worker listening on port %s", port)
+    
     try:
-        server.shutdown()
-    except Exception:
-        pass
-    logger.info("worker exited cleanly")
+        server.serve_forever()
+    except KeyboardInterrupt:
+        logger.info("Worker shutting down (KeyboardInterrupt)")
+    except Exception as e:
+        logger.exception("Unexpected worker error: %s", e)
+    finally:
+        try:
+            server.shutdown()
+        except Exception:
+            pass
+        logger.info("worker exited cleanly")
 
 if __name__ == "__main__":
     main()

@@ -21,7 +21,7 @@ class ChangeDetector:
        request HEAD for ETag/Last-Modified; if unchanged, skip heavy fetch.
     2. Hash-based diff: For fetched HTML (post-render if needed), compute SHA256 of the 
        normalized important content (strip timestamp-like content). Save hash in DB; 
-       if changed — enqueue generation into Redis for Python workers to process.
+       if changed — enqueue generation via Cloud Tasks for Python workers to process.
     """
     
     def __init__(self, project_id: str, run_id: str):

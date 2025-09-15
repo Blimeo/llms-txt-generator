@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '../../../utils/supabase/server'
 import { cookies } from 'next/headers'
 import { v4 as uuidv4 } from 'uuid'
-import { enqueueImmediateJob } from '../../../utils/redis/scheduler'
+import { enqueueImmediateJob } from '../../../utils/cloud-tasks/scheduler'
 
 // Helper function to convert schedule to cron expression and calculate next run
 function getCronAndNextRun(schedule: string): { cron_expression: string | null, next_run_at: string | null } {
@@ -188,10 +188,10 @@ export async function POST(req: NextRequest) {
           // Don't fail the project creation, just log the error
         } else {
           // Note: crawl_jobs table has been removed - job tracking is now handled by the worker directly
-          // Generate job ID for Redis queue
+          // Generate job ID for Cloud Tasks
           const jobId = uuidv4()
           
-          // Enqueue job for immediate execution
+          // Enqueue job for immediate execution via Cloud Tasks
           await enqueueImmediateJob({
             id: jobId,
             url: project.domain,

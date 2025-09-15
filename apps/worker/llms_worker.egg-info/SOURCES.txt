@@ -6,6 +6,8 @@ llms_worker.egg-info/dependency_links.txt
 llms_worker.egg-info/requires.txt
 llms_worker.egg-info/top_level.txt
 worker/__init__.py
+worker/change_detection.py
 worker/crawler.py
+worker/db_utils.py
 worker/llms_generator.py
 worker/storage.py

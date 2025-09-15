@@ -5,7 +5,6 @@ description = "Python worker for llms.txt generation"
 authors = [{name="Your Name", email="you@example.com"}]
 requires-python = ">=3.11"
 dependencies = [
-"redis >= 4.5.0",
 "python-dotenv >= 1.0.0",
 "requests >=2.31.0",
 "beautifulsoup4 >=4.12.2",

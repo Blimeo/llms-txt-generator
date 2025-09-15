@@ -74,6 +74,7 @@ const OneTapComponent = () => {
         context: 'signin',
         ux_mode: 'popup',
         auto_select: false,
+        cancel_on_tap_outside: false,
         // FedCM is now mandatory for Google One Tap as of Oct 2024
         use_fedcm_for_prompt: true,
       })

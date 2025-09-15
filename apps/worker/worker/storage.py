@@ -5,7 +5,6 @@ from typing import Tuple, Optional
 import boto3
 from supabase import create_client, Client
 from datetime import datetime, timedelta
-import redis
 import json
 import uuid
 logger = logging.getLogger(__name__)
@@ -128,12 +127,6 @@ def maybe_upload_s3_from_memory(content: str, filename: str, run_id: str, projec
     
     return public_url
 
-def get_redis_client():
-    """Get Redis client using environment variables."""
-    redis_url = os.environ.get("REDIS_URL", "rediss://default:AfdjAAIncDE0MmZlMWViNTJkNWU0MzVjOGEzOTYwOWQyOTQyNzAyYnAxNjMzMzE@hip-lobster-63331.upstash.io:6379")
-    return redis.from_url(redis_url, decode_responses=True)
-
-
 def calculate_next_run_time(cron_expression: str) -> Optional[datetime]:
     """
     Calculate the next run time based on cron expression.
@@ -163,10 +156,11 @@ def calculate_next_run_time(cron_expression: str) -> Optional[datetime]:
 def schedule_next_run(project_id: str, run_id: str) -> bool:
     """
     Schedule the next run for a project based on its cron expression.
+    Note: This function now only updates the database with the next run time.
+    The actual scheduling will be handled by Cloud Tasks in the NextJS app.
     """
     try:
         supabase = get_supabase_client()
-        redis_client = get_redis_client()
         
         # Get project config to find cron expression
         config_result = supabase.table("project_configs").select(
@@ -198,35 +192,11 @@ def schedule_next_run(project_id: str, run_id: str) -> bool:
             logger.error(f"Failed to update next run time for project {project_id}")
             return False
         
-        # Get project details for the scheduled job
-        project_result = supabase.table("projects").select("domain").eq("id", project_id).single().execute()
-        if not project_result.data:
-            logger.error(f"Project {project_id} not found")
-            return False
-        
-        # Create a scheduled job in Redis
-        job_id = str(uuid.uuid4())
-        scheduled_job = {
-            "id": job_id,
-            "projectId": project_id,
-            "url": project_result.data["domain"],
-            "priority": "NORMAL",
-            "render_mode": "STATIC",
-            "scheduledAt": int(next_run_time.timestamp() * 1000),  # Convert to milliseconds
-            "metadata": {
-                "scheduled_run": True,
-                "cron_expression": config["cron_expression"]
-            }
-        }
-        
-        # Add to Redis sorted set
-        redis_client.zadd("scheduled:jobs", {json.dumps(scheduled_job): next_run_time.timestamp()})
-        
-        logger.info(f"Scheduled next run for project {project_id} at {next_run_time.isoformat()}")
+        logger.info(f"Updated next run time for project {project_id} to {next_run_time.isoformat()}")
         return True
         
     except Exception as e:
-        logger.error(f"Error scheduling next run for project {project_id}: {e}")
+        logger.error(f"Error updating next run time for project {project_id}: {e}")
         return False
 
 

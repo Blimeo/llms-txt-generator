@@ -11,12 +11,11 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
+    "@google-cloud/tasks": "^5.1.0",
     "@repo/ui": "*",
     "@supabase/ssr": "^0.7.0",
     "@supabase/supabase-js": "^2.57.4",
-    "bullmq": "^5.58.5",
     "google-one-tap": "^1.0.6",
-    "ioredis": "^5.7.0",
     "next": "^15.4.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

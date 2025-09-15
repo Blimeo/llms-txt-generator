@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '../../../../../utils/supabase/server'
 import { cookies } from 'next/headers'
 import { v4 as uuidv4 } from 'uuid'
-import { enqueueImmediateJob, scheduleJob } from '../../../../../utils/redis/scheduler'
+import { enqueueImmediateJob, scheduleJob } from '../../../../../utils/cloud-tasks/scheduler'
 
 // GET /api/projects/[id]/runs - List all runs for a project
 export async function GET(
@@ -134,10 +134,10 @@ export async function POST(
       return NextResponse.json({ error: 'Failed to create run' }, { status: 500 })
     }
 
-    // Generate job ID for Redis queue
+    // Generate job ID for Cloud Tasks
     const jobId = uuidv4()
 
-    // Enqueue job in Redis with run_id for immediate execution
+    // Enqueue job via Cloud Tasks with run_id for immediate execution
     await enqueueImmediateJob({ 
       id: jobId, 
       url, 
