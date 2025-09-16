@@ -20,69 +20,74 @@ export interface TaskJob {
 /**
  * Create a Cloud Task for immediate execution
  */
+// Update the enqueueImmediateJob function
 export async function enqueueImmediateJob(job: Omit<TaskJob, 'scheduledAt'>) {
-  const queuePath = client.queuePath(PROJECT_ID, LOCATION, QUEUE_NAME)
-  console.log('queuePath', queuePath)
-  const task = {
-    httpRequest: {
-      httpMethod: 'POST' as const,
-      url: process.env.WORKER_URL || 'https://worker-service-url', // This will be set via environment variable
-      headers: {
-        'Content-Type': 'application/json',
+    const queuePath = client.queuePath(PROJECT_ID, LOCATION, QUEUE_NAME)
+    console.log('queuePath', queuePath)
+    const task = {
+      httpRequest: {
+        httpMethod: 'POST' as const,
+        url: process.env.WORKER_URL || 'https://worker-service-url',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: Buffer.from(JSON.stringify(job)).toString('base64'),
+        // Add OIDC token for authentication
       },
-      body: Buffer.from(JSON.stringify(job)).toString('base64'),
-    },
-    // Add task name for deduplication
-    name: client.taskPath(PROJECT_ID, LOCATION, QUEUE_NAME, job.id),
+      // Add task name for deduplication
+      name: client.taskPath(PROJECT_ID, LOCATION, QUEUE_NAME, job.id),
+    }
+    console.log('task', task)
+    try {
+      const [response] = await client.createTask({ parent: queuePath, task })
+      console.log(`Created task: ${response.name}`)
+      return response
+    } catch (error) {
+      console.error('Error creating Cloud Task:', error)
+      throw error
+    }
   }
-
-  try {
-    const [response] = await client.createTask({ parent: queuePath, task })
-    console.log(`Created task: ${response.name}`)
-    return response
-  } catch (error) {
-    console.error('Error creating Cloud Task:', error)
-    throw error
-  }
-}
-
-/**
- * Schedule a Cloud Task for future execution
- */
-export async function scheduleJob(job: TaskJob) {
-  if (!job.scheduledAt) {
-    throw new Error('scheduledAt is required for scheduled jobs')
-  }
-
-  const queuePath = client.queuePath(PROJECT_ID, LOCATION, QUEUE_NAME)
   
-  const task = {
-    httpRequest: {
-      httpMethod: 'POST' as const,
-      url: process.env.WORKER_URL || 'https://worker-service-url',
-      headers: {
-        'Content-Type': 'application/json',
+  // Update the scheduleJob function
+  export async function scheduleJob(job: TaskJob) {
+    if (!job.scheduledAt) {
+      throw new Error('scheduledAt is required for scheduled jobs')
+    }
+  
+    const queuePath = client.queuePath(PROJECT_ID, LOCATION, QUEUE_NAME)
+    
+    const task = {
+      httpRequest: {
+        httpMethod: 'POST' as const,
+        url: process.env.WORKER_URL || 'https://worker-service-url',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: Buffer.from(JSON.stringify(job)).toString('base64'),
+        // Add OIDC token for authentication
+        oidcToken: {
+          serviceAccountEmail: 'cloud-tasks-invoker@api-project-1042553923996.iam.gserviceaccount.com',
+          audience: process.env.WORKER_URL || 'https://worker-service-url',
+        },
       },
-      body: Buffer.from(JSON.stringify(job)).toString('base64'),
-    },
-    // Schedule the task for future execution
-    scheduleTime: {
-      seconds: Math.floor(job.scheduledAt / 1000),
-      nanos: (job.scheduledAt % 1000) * 1000000,
-    },
-    // Add task name for deduplication
-    name: client.taskPath(PROJECT_ID, LOCATION, QUEUE_NAME, job.id),
+      // Schedule the task for future execution
+      scheduleTime: {
+        seconds: Math.floor(job.scheduledAt / 1000),
+        nanos: (job.scheduledAt % 1000) * 1000000,
+      },
+      // Add task name for deduplication
+      name: client.taskPath(PROJECT_ID, LOCATION, QUEUE_NAME, job.id),
+    }
+  
+    try {
+      const [response] = await client.createTask({ parent: queuePath, task })
+      console.log(`Created scheduled task: ${response.name}`)
+      return response
+    } catch (error) {
+      console.error('Error creating scheduled Cloud Task:', error)
+      throw error
+    }
   }
-
-  try {
-    const [response] = await client.createTask({ parent: queuePath, task })
-    console.log(`Created scheduled task: ${response.name}`)
-    return response
-  } catch (error) {
-    console.error('Error creating scheduled Cloud Task:', error)
-    throw error
-  }
-}
 
 /**
  * Cancel a scheduled task
