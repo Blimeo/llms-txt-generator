@@ -11,7 +11,7 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
-    "@google-cloud/tasks": "^5.1.0",
+    "@google-cloud/tasks": "^4.0.1",
     "@repo/ui": "*",
     "@supabase/ssr": "^0.7.0",
     "@supabase/supabase-js": "^2.57.4",

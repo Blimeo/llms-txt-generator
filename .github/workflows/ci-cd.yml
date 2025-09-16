@@ -145,5 +145,6 @@ jobs:
             SUPABASE_PROJECT_ID=${{ env.SUPABASE_PROJECT_ID }}
             AWS_ACCESS_KEY_ID=${{ env.AWS_ACCESS_KEY_ID }}
             AWS_SECRET_ACCESS_KEY=${{ env.AWS_SECRET_ACCESS_KEY }}
+            WORKER_URL=${{ env.WORKER_URL }}
 
 

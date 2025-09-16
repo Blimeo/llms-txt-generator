@@ -1,10 +1,168 @@
-import { CloudTasksClient } from '@google-cloud/tasks'
+// The Google Cloud Tasks client is buggy and has several known issues with Next. 
+// Much of the client initialization code consists of hacky workarounds.
+
+let CloudTasksClient: any = null
+let client: any = null
 
 const PROJECT_ID = 'api-project-1042553923996'
 const LOCATION = 'us-west1'
-const QUEUE_NAME = 'llms-txt-gen'
+const QUEUE_NAME = 'llms-txt'
 
-const client = new CloudTasksClient()
+const clientConfig = {
+  "interfaces": {
+      "google.cloud.tasks.v2.CloudTasks": {
+          "retry_codes": {
+              "non_idempotent": [],
+              "idempotent": [
+                  "DEADLINE_EXCEEDED",
+                  "UNAVAILABLE"
+              ]
+          },
+          "retry_params": {
+              "default": {
+                  "initial_retry_delay_millis": 100,
+                  "retry_delay_multiplier": 1.3,
+                  "max_retry_delay_millis": 60000,
+                  "initial_rpc_timeout_millis": 20000,
+                  "rpc_timeout_multiplier": 1,
+                  "max_rpc_timeout_millis": 20000,
+                  "total_timeout_millis": 600000
+              },
+              "2607cc7256ff9acb2ee9b232c5722dbbaab18846": {
+                  "initial_retry_delay_millis": 100,
+                  "retry_delay_multiplier": 1.3,
+                  "max_retry_delay_millis": 10000,
+                  "initial_rpc_timeout_millis": 20000,
+                  "rpc_timeout_multiplier": 1,
+                  "max_rpc_timeout_millis": 20000,
+                  "total_timeout_millis": 600000
+              }
+          },
+          "methods": {
+              "ListQueues": {
+                  "timeout_millis": 20000,
+                  "retry_codes_name": "idempotent",
+                  "retry_params_name": "2607cc7256ff9acb2ee9b232c5722dbbaab18846"
+              },
+              "GetQueue": {
+                  "timeout_millis": 20000,
+                  "retry_codes_name": "idempotent",
+                  "retry_params_name": "2607cc7256ff9acb2ee9b232c5722dbbaab18846"
+              },
+              "CreateQueue": {
+                  "timeout_millis": 20000,
+                  "retry_codes_name": "non_idempotent",
+                  "retry_params_name": "default"
+              },
+              "UpdateQueue": {
+                  "timeout_millis": 20000,
+                  "retry_codes_name": "non_idempotent",
+                  "retry_params_name": "default"
+              },
+              "DeleteQueue": {
+                  "timeout_millis": 20000,
+                  "retry_codes_name": "idempotent",
+                  "retry_params_name": "2607cc7256ff9acb2ee9b232c5722dbbaab18846"
+              },
+              "PurgeQueue": {
+                  "timeout_millis": 20000,
+                  "retry_codes_name": "non_idempotent",
+                  "retry_params_name": "default"
+              },
+              "PauseQueue": {
+                  "timeout_millis": 20000,
+                  "retry_codes_name": "non_idempotent",
+                  "retry_params_name": "default"
+              },
+              "ResumeQueue": {
+                  "timeout_millis": 20000,
+                  "retry_codes_name": "non_idempotent",
+                  "retry_params_name": "default"
+              },
+              "GetIamPolicy": {
+                  "timeout_millis": 20000,
+                  "retry_codes_name": "idempotent",
+                  "retry_params_name": "2607cc7256ff9acb2ee9b232c5722dbbaab18846"
+              },
+              "SetIamPolicy": {
+                  "timeout_millis": 20000,
+                  "retry_codes_name": "non_idempotent",
+                  "retry_params_name": "default"
+              },
+              "TestIamPermissions": {
+                  "timeout_millis": 20000,
+                  "retry_codes_name": "idempotent",
+                  "retry_params_name": "2607cc7256ff9acb2ee9b232c5722dbbaab18846"
+              },
+              "ListTasks": {
+                  "timeout_millis": 20000,
+                  "retry_codes_name": "idempotent",
+                  "retry_params_name": "2607cc7256ff9acb2ee9b232c5722dbbaab18846"
+              },
+              "GetTask": {
+                  "timeout_millis": 20000,
+                  "retry_codes_name": "idempotent",
+                  "retry_params_name": "2607cc7256ff9acb2ee9b232c5722dbbaab18846"
+              },
+              "CreateTask": {
+                  "timeout_millis": 20000,
+                  "retry_codes_name": "non_idempotent",
+                  "retry_params_name": "default"
+              },
+              "DeleteTask": {
+                  "timeout_millis": 20000,
+                  "retry_codes_name": "idempotent",
+                  "retry_params_name": "2607cc7256ff9acb2ee9b232c5722dbbaab18846"
+              },
+              "RunTask": {
+                  "timeout_millis": 20000,
+                  "retry_codes_name": "non_idempotent",
+                  "retry_params_name": "default"
+              }
+          }
+      }
+  }
+}
+
+// Initialize the client lazily with proper error handling
+async function getClient() {
+  if (!client) {
+    if (typeof window !== 'undefined') {
+      throw new Error('CloudTasksClient can only be used on the server side')
+    }
+    
+    try {
+      if (!CloudTasksClient) {
+        const { CloudTasksClient: CloudTasksClientClass } = await import('@google-cloud/tasks')
+        CloudTasksClient = CloudTasksClientClass
+      }
+      
+      // Configure authentication for Vercel deployment
+      const authOptions: any = {}
+      
+      // Check if we have service account key in environment variable
+      if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+        try {
+          const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY)
+          authOptions.credentials = credentials
+          authOptions.projectId = credentials.project_id
+        } catch (error) {
+          console.error('Failed to parse GOOGLE_SERVICE_ACCOUNT_KEY:', error)
+          throw new Error('Invalid GOOGLE_SERVICE_ACCOUNT_KEY format')
+        }
+      }
+      
+      client = new CloudTasksClient({ 
+        clientConfig,
+        ...authOptions
+      })
+    } catch (error) {
+      console.error('Failed to initialize CloudTasksClient:', error)
+      throw error
+    }
+  }
+  return client
+}
 
 export interface TaskJob {
   id: string
@@ -22,6 +180,7 @@ export interface TaskJob {
  */
 // Update the enqueueImmediateJob function
 export async function enqueueImmediateJob(job: Omit<TaskJob, 'scheduledAt'>) {
+    const client = await getClient()
     const queuePath = client.queuePath(PROJECT_ID, LOCATION, QUEUE_NAME)
     console.log('queuePath', queuePath)
     const task = {
@@ -32,7 +191,6 @@ export async function enqueueImmediateJob(job: Omit<TaskJob, 'scheduledAt'>) {
           'Content-Type': 'application/json',
         },
         body: Buffer.from(JSON.stringify(job)).toString('base64'),
-        // Add OIDC token for authentication
       },
       // Add task name for deduplication
       name: client.taskPath(PROJECT_ID, LOCATION, QUEUE_NAME, job.id),
@@ -54,6 +212,7 @@ export async function enqueueImmediateJob(job: Omit<TaskJob, 'scheduledAt'>) {
       throw new Error('scheduledAt is required for scheduled jobs')
     }
   
+    const client = await getClient()
     const queuePath = client.queuePath(PROJECT_ID, LOCATION, QUEUE_NAME)
     
     const task = {
@@ -64,11 +223,6 @@ export async function enqueueImmediateJob(job: Omit<TaskJob, 'scheduledAt'>) {
           'Content-Type': 'application/json',
         },
         body: Buffer.from(JSON.stringify(job)).toString('base64'),
-        // Add OIDC token for authentication
-        oidcToken: {
-          serviceAccountEmail: 'cloud-tasks-invoker@api-project-1042553923996.iam.gserviceaccount.com',
-          audience: process.env.WORKER_URL || 'https://worker-service-url',
-        },
       },
       // Schedule the task for future execution
       scheduleTime: {
@@ -93,6 +247,7 @@ export async function enqueueImmediateJob(job: Omit<TaskJob, 'scheduledAt'>) {
  * Cancel a scheduled task
  */
 export async function cancelScheduledJob(jobId: string) {
+  const client = await getClient()
   const taskName = client.taskPath(PROJECT_ID, LOCATION, QUEUE_NAME, jobId)
   
   try {
@@ -109,6 +264,7 @@ export async function cancelScheduledJob(jobId: string) {
  * Get task status (optional - for monitoring)
  */
 export async function getTaskStatus(jobId: string) {
+  const client = await getClient()
   const taskName = client.taskPath(PROJECT_ID, LOCATION, QUEUE_NAME, jobId)
   
   try {

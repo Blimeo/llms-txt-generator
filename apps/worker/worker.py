@@ -13,7 +13,14 @@ from dotenv import load_dotenv
 # local worker modules
 from worker.crawler import crawl_with_change_detection
 from worker.llms_generator import generate_llms_text
-from worker.storage import maybe_upload_s3_from_memory, update_run_status
+from worker.storage import maybe_upload_s3_from_memory, update_run_status, enqueue_immediate_job
+
+# Note: The worker now includes Google Cloud Tasks functionality:
+# - schedule_next_run() in storage.py now enqueues tasks using Cloud Tasks
+# - enqueue_immediate_job() can be used to enqueue immediate tasks
+# - Cloud Tasks client is configured with the same settings as scheduler.ts
+# - All run status updates now automatically schedule next runs when completed
+# - Database operations are optimized to minimize calls and maximize reuse
 
 load_dotenv()  # loads .env from repo root or apps/worker
 
@@ -105,7 +112,6 @@ def process_job_payload(job: dict):
         update_run_status(run_id, "COMPLETE_NO_DIFFS", "No changes detected, skipping generation")
         return {
             "s3_url_txt": None,
-            "s3_url_json": None,
             "pages_crawled": 0,
             "local_files_deleted": True,
             "changes_detected": False,
@@ -114,21 +120,18 @@ def process_job_payload(job: dict):
 
     logger.info("crawl finished: crawled %s pages", crawl_result.get("pages_crawled"))
 
-    # generate llms files in memory
-    txt_content, json_content = generate_llms_text(crawl_result, job_id)
-    logger.info("generated llms files in memory")
+    # generate llms file in memory
+    txt_content = generate_llms_text(crawl_result, job_id)
+    logger.info("generated llms file in memory")
 
     # S3 upload with database updates directly from memory
     changes_detected = crawl_result.get("changes_detected", True)
     txt_filename = f"llms_{job_id}.txt"
-    json_filename = f"llms_{job_id}.json"
     
     s3_url_txt = maybe_upload_s3_from_memory(txt_content, txt_filename, run_id, project_id, changes_detected) if run_id and project_id else None
-    s3_url_json = maybe_upload_s3_from_memory(json_content, json_filename, run_id, project_id, changes_detected) if run_id and project_id else None
 
     result = {
         "s3_url_txt": s3_url_txt,
-        "s3_url_json": s3_url_json,
         "pages_crawled": crawl_result.get("pages_crawled"),
         "local_files_deleted": True,  # Always true since we don't create local files
         "changes_detected": crawl_result.get("changes_detected", True),

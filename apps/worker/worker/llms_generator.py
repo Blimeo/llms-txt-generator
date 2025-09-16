@@ -1,14 +1,13 @@
 # apps/worker/worker/llms_generator.py
-import json
 from datetime import datetime
 from typing import Dict, Any, List
 import os
 
 
-def generate_llms_text(crawl_result: Dict[str, Any], job_id: str) -> tuple[str, str]:
+def generate_llms_text(crawl_result: Dict[str, Any], job_id: str) -> str:
     """
     Generate a textual artifact representing crawl results.
-    Returns tuple of (txt_content, json_content) as strings in memory.
+    Returns txt_content as string in memory.
     """
     now = datetime.utcnow().isoformat() + "Z"
     header = {
@@ -20,7 +19,10 @@ def generate_llms_text(crawl_result: Dict[str, Any], job_id: str) -> tuple[str, 
 
     lines = []
     lines.append("# llms.txt generated artifact")
-    lines.append(json.dumps(header))
+    lines.append(f"Generated at: {header['generated_at']}")
+    lines.append(f"Job ID: {header['job_id']}")
+    lines.append(f"Start URL: {header['start_url']}")
+    lines.append(f"Pages crawled: {header['pages_crawled']}")
     lines.append("")  # blank
     pages: List[Dict[str, Any]] = crawl_result.get("pages", [])
     for i, p in enumerate(pages, start=1):
@@ -46,6 +48,5 @@ def generate_llms_text(crawl_result: Dict[str, Any], job_id: str) -> tuple[str, 
 
     # Generate content in memory
     txt_content = "\n".join(lines)
-    json_content = json.dumps({"meta": header, "pages": pages}, indent=2, ensure_ascii=False)
 
-    return txt_content, json_content
+    return txt_content

@@ -139,7 +139,7 @@ export default function ProjectDetailPage() {
 
   // Auto-refresh effect for queued and in-progress jobs
   useEffect(() => {
-    const hasActiveRuns = runs.some(run => run.status === 'QUEUED' || run.status === 'IN_PROGRESS')
+    const hasActiveRuns = runs.some(run => run.status === 'IN_PROGRESS')
     
     if (hasActiveRuns && !autoRefresh) {
       setAutoRefresh(true)
