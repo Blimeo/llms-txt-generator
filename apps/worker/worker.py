@@ -13,11 +13,21 @@ from dotenv import load_dotenv
 # local worker modules
 from worker.crawler import crawl_with_change_detection
 from worker.llms_generator import generate_llms_text
-from worker.storage import maybe_upload_s3_from_memory, update_run_status, enqueue_immediate_job
+from worker.storage import maybe_upload_s3_from_memory, update_run_status
+from worker.constants import (
+    DEFAULT_PORT,
+    ENV_PORT,
+    ENV_CRAWL_MAX_PAGES,
+    ENV_CRAWL_MAX_DEPTH,
+    ENV_CRAWL_DELAY,
+    RUN_STATUS_IN_PROGRESS,
+    RUN_STATUS_COMPLETE_NO_DIFFS,
+    LLMS_TXT_FILENAME_PREFIX,
+    LLMS_TXT_FILENAME_SUFFIX
+)
 
 # Note: The worker now includes Google Cloud Tasks functionality:
 # - schedule_next_run() in storage.py now enqueues tasks using Cloud Tasks
-# - enqueue_immediate_job() can be used to enqueue immediate tasks
 # - Cloud Tasks client is configured with the same settings as scheduler.ts
 # - All run status updates now automatically schedule next runs when completed
 # - Database operations are optimized to minimize calls and maximize reuse
@@ -83,19 +93,19 @@ def process_job_payload(job: dict):
     url = job.get("url")
     project_id = job.get("projectId")
     run_id = job.get("runId")  # This should be passed from the API
+    is_scheduled = job.get("isScheduled", False)  # Whether this is a scheduled job
     
     if not job_id or not url or not project_id or not run_id:
         raise ValueError("job must contain id+url+project id+run id")
     
-    # Update run status to IN_PROGRESS if we have run_id
-    if run_id:
-        update_run_status(run_id, "IN_PROGRESS")
+    # Update run status to IN_PROGRESS
+    update_run_status(run_id, RUN_STATUS_IN_PROGRESS, project_id, is_scheduled)
 
     # crawl site with change detection
     crawl_opts = {
-        "max_pages": int(os.environ.get("CRAWL_MAX_PAGES", 100)),
-        "max_depth": int(os.environ.get("CRAWL_MAX_DEPTH", 2)),
-        "delay": float(os.environ.get("CRAWL_DELAY", 0.5)),
+        "max_pages": int(os.environ.get(ENV_CRAWL_MAX_PAGES, 100)),
+        "max_depth": int(os.environ.get(ENV_CRAWL_MAX_DEPTH, 2)),
+        "delay": float(os.environ.get(ENV_CRAWL_DELAY, 0.5)),
     }
     
     logger.info("starting crawl with change detection for %s with opts %s", url, crawl_opts)
@@ -109,7 +119,7 @@ def process_job_payload(job: dict):
     # If no changes detected, we can skip llms.txt generation
     if not crawl_result.get("changes_detected", True):
         logger.info("No changes detected, skipping llms.txt generation")
-        update_run_status(run_id, "COMPLETE_NO_DIFFS", "No changes detected, skipping generation")
+        update_run_status(run_id, RUN_STATUS_COMPLETE_NO_DIFFS, project_id, is_scheduled, "No changes detected, skipping generation")
         return {
             "s3_url_txt": None,
             "pages_crawled": 0,
@@ -126,9 +136,9 @@ def process_job_payload(job: dict):
 
     # S3 upload with database updates directly from memory
     changes_detected = crawl_result.get("changes_detected", True)
-    txt_filename = f"llms_{job_id}.txt"
+    txt_filename = f"{LLMS_TXT_FILENAME_PREFIX}{job_id}{LLMS_TXT_FILENAME_SUFFIX}"
     
-    s3_url_txt = maybe_upload_s3_from_memory(txt_content, txt_filename, run_id, project_id, changes_detected) if run_id and project_id else None
+    s3_url_txt = maybe_upload_s3_from_memory(txt_content, txt_filename, run_id, project_id, changes_detected, is_scheduled)
 
     result = {
         "s3_url_txt": s3_url_txt,
@@ -143,7 +153,7 @@ def process_job_payload(job: dict):
 
 
 def main():
-    port = int(os.environ.get("PORT", "8080"))
+    port = int(os.environ.get(ENV_PORT, DEFAULT_PORT))
     
     # Start HTTP server for Cloud Tasks
     server = HTTPServer(("0.0.0.0", port), CloudTasksHandler)

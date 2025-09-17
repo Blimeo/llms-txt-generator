@@ -172,6 +172,7 @@ export interface TaskJob {
   priority?: string
   render_mode?: string
   scheduledAt?: number // Unix timestamp for future execution
+  isScheduled: boolean // Whether this is a scheduled job or immediate job
   metadata?: any
 }
 
@@ -183,6 +184,10 @@ export async function enqueueImmediateJob(job: Omit<TaskJob, 'scheduledAt'>) {
     const client = await getClient()
     const queuePath = client.queuePath(PROJECT_ID, LOCATION, QUEUE_NAME)
     console.log('queuePath', queuePath)
+    
+    // Ensure isScheduled is set to false for immediate jobs
+    const jobWithScheduledFlag = { ...job, isScheduled: false }
+    
     const task = {
       httpRequest: {
         httpMethod: 'POST' as const,
@@ -190,7 +195,7 @@ export async function enqueueImmediateJob(job: Omit<TaskJob, 'scheduledAt'>) {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: Buffer.from(JSON.stringify(job)).toString('base64'),
+        body: Buffer.from(JSON.stringify(jobWithScheduledFlag)).toString('base64'),
       },
       // Add task name for deduplication
       name: client.taskPath(PROJECT_ID, LOCATION, QUEUE_NAME, job.id),
@@ -215,6 +220,9 @@ export async function enqueueImmediateJob(job: Omit<TaskJob, 'scheduledAt'>) {
     const client = await getClient()
     const queuePath = client.queuePath(PROJECT_ID, LOCATION, QUEUE_NAME)
     
+    // Ensure isScheduled is set to true for scheduled jobs
+    const jobWithScheduledFlag = { ...job, isScheduled: true }
+    
     const task = {
       httpRequest: {
         httpMethod: 'POST' as const,
@@ -222,7 +230,7 @@ export async function enqueueImmediateJob(job: Omit<TaskJob, 'scheduledAt'>) {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: Buffer.from(JSON.stringify(job)).toString('base64'),
+        body: Buffer.from(JSON.stringify(jobWithScheduledFlag)).toString('base64'),
       },
       // Schedule the task for future execution
       scheduleTime: {

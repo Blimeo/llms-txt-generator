@@ -1,7 +1,8 @@
 # apps/worker/worker/llms_generator.py
+"""Generate LLMS.txt formatted content from crawl results."""
+
 from datetime import datetime
 from typing import Dict, Any, List
-import os
 
 
 def generate_llms_text(crawl_result: Dict[str, Any], job_id: str) -> str:

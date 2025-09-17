@@ -144,7 +144,8 @@ export async function POST(
       projectId,
       runId: run.id,
       priority,
-      render_mode
+      render_mode,
+      isScheduled: false
     })
 
     return NextResponse.json({ 

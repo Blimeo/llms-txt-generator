@@ -1,21 +1,29 @@
 # apps/worker/worker/crawler.py
-import time
+"""Web crawler with change detection capabilities."""
+
 import re
+import time
 import logging
 from urllib.parse import urlparse, urljoin, urldefrag
-from collections import deque
+from typing import Dict, List, Optional, Any
+
 import requests
 from bs4 import BeautifulSoup
-from typing import Dict, Set, List, Optional, Any
 
 from .change_detection import ChangeDetector
 from .storage import get_supabase_client
+from .constants import (
+    DEFAULT_USER_AGENT,
+    HTML_CONTENT_TYPES,
+    DEFAULT_MAX_PAGES,
+    DEFAULT_MAX_DEPTH,
+    DEFAULT_CRAWL_DELAY,
+    DEFAULT_TIMEOUT,
+    TABLE_PAGES
+)
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
-DEFAULT_USER_AGENT = "llms-txt-crawler/1.0 (+https://example.com)"
-HTML_CONTENT_TYPES = {"text/html", "application/xhtml+xml"}
+logger.setLevel(logging.INFO)  # Set appropriate log level
 
 
 class Robots:
@@ -153,7 +161,7 @@ def _create_page_record(project_id: str, page_info: Dict) -> Optional[str]:
             'metadata': page_info.get('metadata', {})
         }
         
-        result = supabase.table("pages").insert(page_data).execute()
+        result = supabase.table(TABLE_PAGES).insert(page_data).execute()
         
         if result.data:
             page_id = result.data[0]['id']
@@ -172,9 +180,9 @@ def crawl_with_change_detection(
     start_url: str,
     project_id: str,
     run_id: str,
-    max_pages: int = 200,
-    max_depth: int = 2,
-    delay: float = 0.5,
+    max_pages: int = DEFAULT_MAX_PAGES,
+    max_depth: int = DEFAULT_MAX_DEPTH,
+    delay: float = DEFAULT_CRAWL_DELAY,
     session: Optional[requests.Session] = None,
     user_agent: str = DEFAULT_USER_AGENT,
 ) -> Dict[str, Any]:
@@ -219,7 +227,7 @@ def crawl_with_change_detection(
         
         try:
             # Fetch page
-            r = session.get(url, timeout=15)
+            r = session.get(url, timeout=DEFAULT_TIMEOUT)
             if r.status_code != 200:
                 logger.warning(f"Failed to fetch {url}: {r.status_code}")
                 continue
@@ -290,31 +298,3 @@ def crawl_with_change_detection(
     return result
 
 
-def _create_page_record(project_id: str, page_info: Dict) -> Optional[str]:
-    """Create a new page record in the database."""
-    try:
-        supabase = get_supabase_client()
-        
-        page_data = {
-            "project_id": project_id,
-            "url": page_info["url"],
-            "path": page_info["path"],
-            "canonical_url": page_info.get("canonical_url"),
-            "render_mode": page_info.get("render_mode", "STATIC"),
-            "is_indexable": page_info.get("is_indexable", True),
-            "metadata": page_info.get("metadata", {})
-        }
-        
-        result = supabase.table("pages").insert(page_data).execute()
-        
-        if result.data:
-            page_id = result.data[0]["id"]
-            logger.info(f"Created page record {page_id} for {page_info['url']}")
-            return page_id
-        else:
-            logger.error(f"Failed to create page record for {page_info['url']}")
-            return None
-            
-    except Exception as e:
-        logger.error(f"Error creating page record for {page_info['url']}: {e}")
-        return None

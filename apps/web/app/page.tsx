@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import OneTapComponent from './google-auth'
-import Navigation from './components/Navigation'
+import { Navigation, LoadingSpinner } from './components'
 import { createClient } from '@/utils/supabase/client'
 import type { User } from '@supabase/supabase-js'
 
@@ -71,13 +71,7 @@ export default function HomePage() {
 
   // Show loading state while checking authentication
   if (loadingAuth) {
-    return (
-      <main className="p-8">
-        <div className="flex items-center justify-center min-h-32">
-          <div className="text-lg">Loading...</div>
-        </div>
-      </main>
-    )
+    return <LoadingSpinner message="Loading..." />
   }
 
   return (
@@ -180,7 +174,7 @@ export default function HomePage() {
                   3. Monitor & Manage
                 </h3>
                 <p className="text-gray-600">
-                  View your tracked sites, monitor change history, and manage your <code className="bg-gray-100 px-1 py-0.5 rounded text-sm font-mono">llms.txt</code> files from a simple dashboard.
+                  View your tracked sites, monitor change history, and manage your <code className="bg-gray-100 px-1 py-0.5 rounded text-sm font-mono">llms.txt</code> files from a simple dashboard. Add webhooks to automatically update your site when changes are detected.
                 </p>
               </div>
             </div>

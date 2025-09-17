@@ -1,22 +1,35 @@
 # apps/worker/worker/change_detection.py
+"""Change detection for web pages using headers and content hashing."""
+
 import hashlib
 import logging
-import requests
-from typing import Dict, List, Optional, Set, Tuple
-from urllib.parse import urlparse, urljoin
+import re
 from datetime import datetime
+from typing import Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 import xml.etree.ElementTree as ET
+
+import requests
 from bs4 import BeautifulSoup
 
 from .storage import get_supabase_client
-from .db_utils import DatabaseUtils
+from .constants import (
+    DEFAULT_USER_AGENT,
+    HEAD_TIMEOUT,
+    DEFAULT_TIMEOUT,
+    SITEMAP_NAMESPACE,
+    TIMESTAMP_PATTERNS,
+    DYNAMIC_CONTENT_PATTERNS,
+    DYNAMIC_CONTENT_SELECTORS,
+    TABLE_PAGES,
+    TABLE_PAGE_REVISIONS
+)
 
 logger = logging.getLogger(__name__)
 
 
 class ChangeDetector:
     """
-    Implements change detection following step 1 of the specification:
     1. Sitemap + Headers first: If site has sitemap.xml, fetch and use LastMod / URLs; 
        request HEAD for ETag/Last-Modified; if unchanged, skip heavy fetch.
     2. Hash-based diff: For fetched HTML (post-render if needed), compute SHA256 of the 
@@ -28,10 +41,9 @@ class ChangeDetector:
         self.project_id = project_id
         self.run_id = run_id
         self.supabase = get_supabase_client()
-        self.db_utils = DatabaseUtils()
         self.session = requests.Session()
         self.session.headers.update({
-            "User-Agent": "llms-txt-crawler/1.0 (+https://example.com)"
+            "User-Agent": DEFAULT_USER_AGENT
         })
     
     def detect_changes(self, base_url: str) -> Dict[str, any]:
@@ -68,7 +80,8 @@ class ChangeDetector:
         new_pages = []
         
         # Process URLs in batches
-        batch_size = 10
+        from .constants import DEFAULT_BATCH_SIZE
+        batch_size = DEFAULT_BATCH_SIZE
         url_list = list(all_urls)
         
         for i in range(0, len(url_list), batch_size):
@@ -80,9 +93,7 @@ class ChangeDetector:
             unchanged_pages.extend(batch_results['unchanged'])
             new_pages.extend(batch_results['new'])
         
-        # Cache sitemap URLs for future use
-        if sitemap_urls:
-            self.db_utils.cache_sitemap_urls(self.project_id, sitemap_urls)
+        # Note: Sitemap URLs are no longer cached
         
         has_changes = len(changed_pages) > 0 or len(new_pages) > 0
         
@@ -102,9 +113,6 @@ class ChangeDetector:
         if changed_pages:
             logger.info(f"Changed pages: {[p['url'] for p in changed_pages]}")
         
-        # Mark unchanged pages
-        self.mark_unchanged_pages(unchanged_pages)
-        
         return result
     
     def _fetch_sitemap_urls(self, base_url: str) -> List[str]:
@@ -113,7 +121,7 @@ class ChangeDetector:
         sitemap_url = f"{parsed.scheme}://{parsed.netloc}/sitemap.xml"
         
         try:
-            response = self.session.get(sitemap_url, timeout=10)
+            response = self.session.get(sitemap_url, timeout=HEAD_TIMEOUT)
             if response.status_code == 200:
                 return self._parse_sitemap(response.text)
         except Exception as e:
@@ -128,34 +136,49 @@ class ChangeDetector:
             root = ET.fromstring(sitemap_xml)
             
             # Handle both sitemap and sitemapindex
+            sitemap_ns = f"{{{SITEMAP_NAMESPACE}}}"
             if root.tag.endswith('sitemapindex'):
                 # This is a sitemap index, get individual sitemaps
-                for sitemap in root.findall('.//{http://www.sitemaps.org/schemas/sitemap/0.9}sitemap'):
-                    loc = sitemap.find('{http://www.sitemaps.org/schemas/sitemap/0.9}loc')
+                for sitemap in root.findall(f'.//{sitemap_ns}sitemap'):
+                    loc = sitemap.find(f'{sitemap_ns}loc')
                     if loc is not None:
                         # Fetch individual sitemap
                         try:
-                            sub_response = self.session.get(loc.text, timeout=10)
+                            sub_response = self.session.get(loc.text, timeout=HEAD_TIMEOUT)
                             if sub_response.status_code == 200:
                                 urls.extend(self._parse_sitemap(sub_response.text))
                         except Exception as e:
                             logger.warning(f"Failed to fetch sub-sitemap {loc.text}: {e}")
             else:
                 # Regular sitemap
-                for url in root.findall('.//{http://www.sitemaps.org/schemas/sitemap/0.9}url'):
-                    loc = url.find('{http://www.sitemaps.org/schemas/sitemap/0.9}loc')
+                for url in root.findall(f'.//{sitemap_ns}url'):
+                    loc = url.find(f'{sitemap_ns}loc')
                     if loc is not None:
-                        urls.append(loc.text)
+                        # Normalize URL to ensure consistent comparison with existing pages
+                        normalized_url = self._normalize_url(loc.text)
+                        urls.append(normalized_url)
         except ET.ParseError as e:
             logger.warning(f"Failed to parse sitemap XML: {e}")
         
         return urls
     
+    def _normalize_url(self, url: str) -> str:
+        """Normalize URL to ensure consistent comparison."""
+        if not url:
+            return url
+        
+        # Ensure URL has a scheme - if missing, add https://
+        if not url.startswith(('http://', 'https://')):
+            logger.debug(f"URL missing scheme, adding https://: {url}")
+            url = f"https://{url}"
+        
+        return url
+    
     def _get_existing_pages_with_revisions(self) -> List[Dict]:
         """Get existing pages from database with their current revision info."""
         try:
             # First get all pages
-            result = self.supabase.table("pages").select(
+            result = self.supabase.table(TABLE_PAGES).select(
                 "id, url, path, canonical_url, current_revision_id, last_seen_at, render_mode, is_indexable, metadata"
             ).eq("project_id", self.project_id).execute()
             
@@ -170,7 +193,7 @@ class ChangeDetector:
             
             revisions = {}
             if current_revision_ids:
-                rev_result = self.supabase.table("page_revisions").select(
+                rev_result = self.supabase.table(TABLE_PAGE_REVISIONS).select(
                     "id, page_id, content_sha256, created_at, metadata"
                 ).in_("id", current_revision_ids).execute()
                 
@@ -178,15 +201,16 @@ class ChangeDetector:
                     for revision in rev_result.data:
                         revisions[revision['id']] = revision
             
-            # Attach current revision info to each page
+            # Attach current revision info to each page and validate URLs
             for page in pages:
                 current_revision_id = page.get('current_revision_id')
                 if current_revision_id and current_revision_id in revisions:
                     page['current_revision'] = revisions[current_revision_id]
-                    logger.debug(f"Page {page['url']} has current revision {current_revision_id}")
                 else:
                     page['current_revision'] = None
-                    logger.debug(f"Page {page['url']} has no current revision (current_revision_id: {current_revision_id})")
+                
+                # Normalize URL to ensure consistent comparison
+                page['url'] = self._normalize_url(page['url'])
             
             logger.info(f"Retrieved {len(pages)} pages with revisions")
             return pages
@@ -203,11 +227,15 @@ class ChangeDetector:
         # Create lookup for existing pages
         existing_pages_by_url = {page['url']: page for page in existing_pages}
         
+        logger.debug(f"Processing {len(urls)} URLs against {len(existing_pages_by_url)} existing pages")
+        logger.debug(f"Existing page URLs: {list(existing_pages_by_url.keys())[:5]}...")  # Show first 5 for debugging
+        
         for url in urls:
             try:
                 if url in existing_pages_by_url:
                     # Existing page - check for changes
                     existing_page = existing_pages_by_url[url]
+                    logger.debug(f"Found existing page for URL: {url}")
                     change_result = self._check_page_changes(url, existing_page)
                     
                     if change_result['has_changed']:
@@ -220,6 +248,7 @@ class ChangeDetector:
                         unchanged_pages.append(existing_page)
                 else:
                     # New page
+                    logger.debug(f"Treating as new page: {url}")
                     new_pages.append(self._get_page_info(url))
                     
             except Exception as e:
@@ -241,7 +270,7 @@ class ChangeDetector:
         """
         try:
             # First, try HEAD request to check headers
-            head_response = self.session.head(url, timeout=10, allow_redirects=True)
+            head_response = self.session.head(url, timeout=HEAD_TIMEOUT, allow_redirects=True)
             
             if head_response.status_code != 200:
                 logger.info(f"Page {url} returned {head_response.status_code}, considering as changed")
@@ -264,11 +293,7 @@ class ChangeDetector:
                     stored_last_modified = current_revision.get('metadata', {}).get('last_modified')
                     
                     # Debug logging
-                    logger.debug(f"Header comparison for {url}:")
-                    logger.debug(f"  Current ETag: {etag}")
-                    logger.debug(f"  Stored ETag: {stored_etag}")
-                    logger.debug(f"  Current Last-Modified: {last_modified}")
-                    logger.debug(f"  Stored Last-Modified: {stored_last_modified}")
+                    logger.debug(f"Header comparison for {url}: ETag={etag}, Last-Modified={last_modified}")
                     
                     # Check if headers have changed (only if both values exist and are different)
                     etag_changed = etag and stored_etag and etag != stored_etag
@@ -321,7 +346,7 @@ class ChangeDetector:
         """Check if page content has changed by comparing SHA256 hashes."""
         try:
             # Fetch full page
-            response = self.session.get(url, timeout=15)
+            response = self.session.get(url, timeout=DEFAULT_TIMEOUT)
             if response.status_code != 200:
                 return {
                     'has_changed': True,
@@ -334,9 +359,7 @@ class ChangeDetector:
             content_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()
             
             # Debug logging
-            logger.debug(f"Checking content hash for {url}")
-            logger.debug(f"Current revision: {current_revision}")
-            logger.debug(f"New content hash: {content_hash[:8]}...")
+            logger.debug(f"Checking content hash for {url}: {content_hash[:8]}...")
             
             # Check if we have a current revision
             if not current_revision:
@@ -385,8 +408,6 @@ class ChangeDetector:
         Extract and normalize content for hashing.
         Strips timestamps and other dynamic content that shouldn't affect change detection.
         """
-        import re
-        
         soup = BeautifulSoup(html, 'lxml')
         
         # Remove script and style tags
@@ -394,53 +415,19 @@ class ChangeDetector:
             tag.decompose()
         
         # Remove elements that commonly contain dynamic content
-        for selector in [
-            '[class*="timestamp"]', '[class*="date"]', '[class*="time"]',
-            '[id*="timestamp"]', '[id*="date"]', '[id*="time"]',
-            '.timestamp', '.date', '.time', '.updated', '.modified',
-            '[data-timestamp]', '[data-date]', '[data-time]'
-        ]:
+        for selector in DYNAMIC_CONTENT_SELECTORS:
             for element in soup.select(selector):
                 element.decompose()
         
         # Get text content
         text = soup.get_text()
         
-        # Remove common timestamp patterns (more comprehensive)
-        timestamp_patterns = [
-            # ISO 8601 formats
-            r'\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?',
-            # Date formats
-            r'\d{1,2}/\d{1,2}/\d{4}',
-            r'\d{4}/\d{1,2}/\d{1,2}',
-            r'\d{1,2}-\d{1,2}-\d{4}',
-            # Time formats
-            r'\d{1,2}:\d{2}:\d{2}(?:\.\d+)?',
-            r'\d{1,2}:\d{2}(?::\d{2})?',
-            # Relative time patterns
-            r'\d+\s+(?:seconds?|minutes?|hours?|days?|weeks?|months?|years?)\s+ago',
-            r'(?:just now|a moment ago|yesterday|today|tomorrow)',
-            # Unix timestamps (10 digits)
-            r'\b\d{10}\b',
-            # Common date/time words
-            r'(?:last updated|modified|created|published):\s*\d{4}-\d{2}-\d{2}',
-            r'(?:last updated|modified|created|published):\s*\d{1,2}/\d{1,2}/\d{4}',
-        ]
-        
-        for pattern in timestamp_patterns:
+        # Remove common timestamp patterns
+        for pattern in TIMESTAMP_PATTERNS:
             text = re.sub(pattern, '', text, flags=re.IGNORECASE)
         
         # Remove common dynamic content patterns
-        dynamic_patterns = [
-            r'page\s+load\s+time:\s*[\d.]+ms',
-            r'generated\s+at:\s*[\d\-\s:]+',
-            r'last\s+modified:\s*[\d\-\s:]+',
-            r'version:\s*[\d.]+',
-            r'build\s+[\d.]+',
-            r'revision\s+[\d.]+',
-        ]
-        
-        for pattern in dynamic_patterns:
+        for pattern in DYNAMIC_CONTENT_PATTERNS:
             text = re.sub(pattern, '', text, flags=re.IGNORECASE)
         
         # Remove excessive whitespace and normalize
@@ -455,7 +442,7 @@ class ChangeDetector:
     def _get_last_revision(self, page_id: str) -> Optional[Dict]:
         """Get the most recent revision for a page."""
         try:
-            result = self.supabase.table("page_revisions").select("*").eq(
+            result = self.supabase.table(TABLE_PAGE_REVISIONS).select("*").eq(
                 "page_id", page_id
             ).order("created_at", desc=True).limit(1).execute()
             
@@ -469,7 +456,7 @@ class ChangeDetector:
     def _get_revision_by_id(self, revision_id: str) -> Optional[Dict]:
         """Get a specific revision by ID."""
         try:
-            result = self.supabase.table("page_revisions").select("*").eq(
+            result = self.supabase.table(TABLE_PAGE_REVISIONS).select("*").eq(
                 "id", revision_id
             ).execute()
             
@@ -482,6 +469,9 @@ class ChangeDetector:
     
     def _get_page_info(self, url: str) -> Dict:
         """Get basic page info for a URL."""
+        # Normalize URL to ensure consistent comparison
+        url = self._normalize_url(url)
+        
         parsed = urlparse(url)
         return {
             'url': url,
@@ -509,19 +499,11 @@ class ChangeDetector:
                     logger.info(f"Page {page_id} content hash unchanged ({content_hash[:8]}...), skipping revision creation")
                     
                     # Update page's last_seen_at but don't create new revision
-                    self.supabase.table("pages").update({
+                    self.supabase.table(TABLE_PAGES).update({
                         'last_seen_at': datetime.utcnow().isoformat()
                     }).eq('id', page_id).execute()
                     
-                    # Create diff record for UNCHANGED
-                    self.db_utils.create_diff_record(
-                        run_id=self.run_id,
-                        page_id=page_id,
-                        from_revision_id=old_revision_id,
-                        to_revision_id=old_revision_id,  # Same revision
-                        change_type="UNCHANGED",
-                        summary="Content hash unchanged despite header changes"
-                    )
+                    # Note: Diff records are no longer created
                     
                     return old_revision_id  # Return existing revision ID
             
@@ -555,39 +537,18 @@ class ChangeDetector:
                 'metadata': metadata or {}
             }
             
-            result = self.supabase.table("page_revisions").insert(revision_data).execute()
+            result = self.supabase.table(TABLE_PAGE_REVISIONS).insert(revision_data).execute()
             
             if result.data:
                 revision_id = result.data[0]['id']
                 logger.info(f"Saved page revision {revision_id} for page {page_id} with hash {content_hash[:8]}...")
                 
                 # Update page's current_revision_id
-                self.supabase.table("pages").update({
+                self.supabase.table(TABLE_PAGES).update({
                     'current_revision_id': revision_id,
                     'last_seen_at': datetime.utcnow().isoformat()
                 }).eq('id', page_id).execute()
-                
-                # Create diff record if we have an old revision
-                if old_revision_id:
-                    self.db_utils.create_diff_record(
-                        run_id=self.run_id,
-                        page_id=page_id,
-                        from_revision_id=old_revision_id,
-                        to_revision_id=revision_id,
-                        change_type="MODIFIED",
-                        summary=f"Content updated - hash: {content_hash[:8]}..."
-                    )
-                else:
-                    # This is a new page
-                    self.db_utils.create_diff_record(
-                        run_id=self.run_id,
-                        page_id=page_id,
-                        from_revision_id=None,
-                        to_revision_id=revision_id,
-                        change_type="CREATED",
-                        summary="New page discovered"
-                    )
-                
+                      
                 return revision_id
             else:
                 logger.error(f"Failed to save page revision for {page_id}")
@@ -596,13 +557,3 @@ class ChangeDetector:
         except Exception as e:
             logger.error(f"Error saving page revision for {page_id}: {e}")
             return None
-    
-    def mark_unchanged_pages(self, unchanged_pages: List[Dict]) -> None:
-        """Mark unchanged pages in the current run."""
-        try:
-            unchanged_page_ids = [page['id'] for page in unchanged_pages if page.get('id')]
-            if unchanged_page_ids:
-                self.db_utils.mark_pages_as_unchanged(self.run_id, unchanged_page_ids)
-                logger.info(f"Marked {len(unchanged_page_ids)} pages as unchanged")
-        except Exception as e:
-            logger.error(f"Error marking unchanged pages: {e}")
