@@ -85,7 +85,7 @@ class CloudTasksClient:
         try:
             # Get worker URL from environment
             worker_url = os.environ.get("WORKER_URL", "https://worker-service-url")
-            
+            logger.info("worker_url: %s", worker_url)
             # Convert datetime to timestamp
             timestamp = timestamp_pb2.Timestamp()
             timestamp.FromDatetime(scheduled_at)

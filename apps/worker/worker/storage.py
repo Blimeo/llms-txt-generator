@@ -285,13 +285,13 @@ def schedule_next_run(project_id: str, run_id: str) -> bool:
         if not task_name:
             logger.error(f"Failed to enqueue scheduled task for project {project_id}")
             return False
+        print(task_name)
         
         # Update project config with next run time and task name in a single operation
         current_time = datetime.utcnow().isoformat()
         update_result = supabase.table("project_configs").update({
             "last_run_at": current_time,
             "next_run_at": next_run_time.isoformat(),
-            "scheduled_task_name": task_name
         }).eq("project_id", project_id).execute()
         
         if not update_result.data:

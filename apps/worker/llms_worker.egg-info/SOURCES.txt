@@ -7,6 +7,7 @@ llms_worker.egg-info/requires.txt
 llms_worker.egg-info/top_level.txt
 worker/__init__.py
 worker/change_detection.py
+worker/cloud_tasks_client.py
 worker/crawler.py
 worker/db_utils.py
 worker/llms_generator.py
