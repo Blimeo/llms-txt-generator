@@ -76,43 +76,7 @@ ENV_CRAWL_DELAY = "CRAWL_DELAY"
 # Default port
 DEFAULT_PORT = 8080
 
-# Content extraction patterns
-TIMESTAMP_PATTERNS = [
-    # ISO 8601 formats
-    r'\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?',
-    # Date formats
-    r'\d{1,2}/\d{1,2}/\d{4}',
-    r'\d{4}/\d{1,2}/\d{1,2}',
-    r'\d{1,2}-\d{1,2}-\d{4}',
-    # Time formats
-    r'\d{1,2}:\d{2}:\d{2}(?:\.\d+)?',
-    r'\d{1,2}:\d{2}(?::\d{2})?',
-    # Relative time patterns
-    r'\d+\s+(?:seconds?|minutes?|hours?|days?|weeks?|months?|years?)\s+ago',
-    r'(?:just now|a moment ago|yesterday|today|tomorrow)',
-    # Unix timestamps (10 digits)
-    r'\b\d{10}\b',
-    # Common date/time words
-    r'(?:last updated|modified|created|published):\s*\d{4}-\d{2}-\d{2}',
-    r'(?:last updated|modified|created|published):\s*\d{1,2}/\d{1,2}/\d{4}',
-]
-
-DYNAMIC_CONTENT_PATTERNS = [
-    r'page\s+load\s+time:\s*[\d.]+ms',
-    r'generated\s+at:\s*[\d\-\s:]+',
-    r'last\s+modified:\s*[\d\-\s:]+',
-    r'version:\s*[\d.]+',
-    r'build\s+[\d.]+',
-    r'revision\s+[\d.]+',
-]
-
-# CSS selectors for dynamic content removal
-DYNAMIC_CONTENT_SELECTORS = [
-    '[class*="timestamp"]', '[class*="date"]', '[class*="time"]',
-    '[id*="timestamp"]', '[id*="date"]', '[id*="time"]',
-    '.timestamp', '.date', '.time', '.updated', '.modified',
-    '[data-timestamp]', '[data-date]', '[data-time]'
-]
+# Content extraction patterns (simplified)
 
 # Sitemap XML namespace
 SITEMAP_NAMESPACE = "http://www.sitemaps.org/schemas/sitemap/0.9"

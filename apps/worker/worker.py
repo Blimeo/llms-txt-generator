@@ -132,7 +132,6 @@ def process_job_payload(job: dict):
 
     # generate llms file in memory
     txt_content = generate_llms_text(crawl_result, job_id)
-    logger.info("generated llms file in memory")
 
     # S3 upload with database updates directly from memory
     changes_detected = crawl_result.get("changes_detected", True)

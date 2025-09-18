@@ -42,11 +42,10 @@ def calculate_next_run_time(cron_expression: str) -> Optional[datetime]:
     return None
 
 
-def schedule_next_run(project_id: str, run_id: str) -> bool:
+def schedule_next_run(project_id: str) -> bool:
     """
     Schedule the next run for a project based on its cron expression.
-    This function now enqueues the task using Google Cloud Tasks.
-    Optimized to minimize database operations by joining tables.
+    This function creates a new run in the database and enqueues the task using Google Cloud Tasks.
     """
     try:
         supabase = get_supabase_client()
@@ -78,6 +77,20 @@ def schedule_next_run(project_id: str, run_id: str) -> bool:
             logger.warning(f"No domain found for project {project_id}")
             return False
         
+        # Create a new run in the database with QUEUED status
+        run_result = supabase.table("runs").insert({
+            "project_id": project_id,
+            "status": "QUEUED",
+            "created_at": datetime.utcnow().isoformat()
+        }).execute()
+        
+        if not run_result.data:
+            logger.error(f"Failed to create new run for project {project_id}")
+            return False
+        
+        new_run_id = run_result.data[0]["id"]
+        logger.info(f"Created new run {new_run_id} for project {project_id}")
+        
         # Create job payload for Cloud Tasks
         job_id = f"scheduled_{project_id}_{int(next_run_time.timestamp())}"
         job_payload = {
@@ -87,6 +100,7 @@ def schedule_next_run(project_id: str, run_id: str) -> bool:
             "priority": "scheduled",
             "render_mode": "scheduled",
             "scheduledAt": int(next_run_time.timestamp() * 1000),  # Convert to milliseconds
+            "runId": new_run_id,
             "metadata": {
                 "cron_expression": config["cron_expression"],
                 "scheduled_by": "worker"

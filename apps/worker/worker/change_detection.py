@@ -18,9 +18,6 @@ from .constants import (
     HEAD_TIMEOUT,
     DEFAULT_TIMEOUT,
     SITEMAP_NAMESPACE,
-    TIMESTAMP_PATTERNS,
-    DYNAMIC_CONTENT_PATTERNS,
-    DYNAMIC_CONTENT_SELECTORS,
     TABLE_PAGES,
     TABLE_PAGE_REVISIONS
 )
@@ -68,11 +65,8 @@ class ChangeDetector:
         
         # Step 2: Hash-based diff for fetched HTML content
         # Batch process all URLs to minimize DB calls
-        all_urls = set(sitemap_urls) | existing_urls
-        if not all_urls and not existing_pages:
-            # If no sitemap URLs and no existing pages, treat the base URL as new
-            logger.info("No sitemap or existing pages found, treating base URL as new page")
-            all_urls = {base_url}
+        all_urls = set(sitemap_urls) | existing_urls | {base_url}
+        logger.info(f"Processing {len(all_urls)} URLs total (sitemap: {len(sitemap_urls)}, existing: {len(existing_urls)}, base_url included)")
         
         # Process all URLs in batches for efficiency
         changed_pages = []
@@ -92,9 +86,7 @@ class ChangeDetector:
             changed_pages.extend(batch_results['changed'])
             unchanged_pages.extend(batch_results['unchanged'])
             new_pages.extend(batch_results['new'])
-        
-        # Note: Sitemap URLs are no longer cached
-        
+                
         has_changes = len(changed_pages) > 0 or len(new_pages) > 0
         
         result = {
@@ -264,73 +256,14 @@ class ChangeDetector:
     
     def _check_page_changes(self, url: str, existing_page: Dict) -> Dict[str, any]:
         """
-        Check if a page has changed using HEAD request for headers,
-        then full fetch if headers suggest changes.
-        Returns detailed change information.
+        Check if a page has changed by comparing content hashes.
+        Simplified approach - just check content hash directly.
         """
         try:
-            # First, try HEAD request to check headers
-            head_response = self.session.head(url, timeout=HEAD_TIMEOUT, allow_redirects=True)
-            
-            if head_response.status_code != 200:
-                logger.info(f"Page {url} returned {head_response.status_code}, considering as changed")
-                return {
-                    'has_changed': True,
-                    'reason': f'HTTP {head_response.status_code}',
-                    'old_revision_id': existing_page.get('current_revision_id')
-                }
-            
-            # Check ETag and Last-Modified headers first
-            etag = head_response.headers.get('ETag')
-            last_modified = head_response.headers.get('Last-Modified')
-            
             # Get current revision info
             current_revision = existing_page.get('current_revision')
             
-            if etag or last_modified:
-                if current_revision:
-                    stored_etag = current_revision.get('metadata', {}).get('etag')
-                    stored_last_modified = current_revision.get('metadata', {}).get('last_modified')
-                    
-                    # Debug logging
-                    logger.debug(f"Header comparison for {url}: ETag={etag}, Last-Modified={last_modified}")
-                    
-                    # Check if headers have changed (only if both values exist and are different)
-                    etag_changed = etag and stored_etag and etag != stored_etag
-                    last_modified_changed = last_modified and stored_last_modified and last_modified != stored_last_modified
-                    
-                    # Also check if we have a new header that wasn't there before
-                    etag_new = etag and not stored_etag
-                    last_modified_new = last_modified and not stored_last_modified
-                    
-                    if etag_changed or last_modified_changed or etag_new or last_modified_new:
-                        # Headers changed, but we need to check content hash to be sure
-                        change_reason = []
-                        if etag_changed:
-                            change_reason.append(f"ETag: {stored_etag} -> {etag}")
-                        if last_modified_changed:
-                            change_reason.append(f"Last-Modified: {stored_last_modified} -> {last_modified}")
-                        if etag_new:
-                            change_reason.append(f"New ETag: {etag}")
-                        if last_modified_new:
-                            change_reason.append(f"New Last-Modified: {last_modified}")
-                        
-                        logger.info(f"Page {url} headers changed ({', '.join(change_reason)}), checking content hash...")
-                        return self._check_content_hash_detailed(url, existing_page, current_revision)
-                    else:
-                        logger.debug(f"Page {url} headers unchanged, skipping content hash check")
-                        return {
-                            'has_changed': False,
-                            'reason': 'Headers unchanged',
-                            'old_revision_id': current_revision.get('id')
-                        }
-                else:
-                    # No current revision but headers present - need to check content
-                    logger.debug(f"Page {url} has headers but no current revision, checking content hash...")
-                    return self._check_content_hash_detailed(url, existing_page, current_revision)
-            
-            # If no headers present, do a full fetch to check content hash
-            logger.debug(f"Page {url} has no ETag or Last-Modified headers, checking content hash...")
+            # Always check content hash for simplicity
             return self._check_content_hash_detailed(url, existing_page, current_revision)
             
         except Exception as e:
@@ -406,7 +339,7 @@ class ChangeDetector:
     def _extract_normalized_content(self, html: str) -> str:
         """
         Extract and normalize content for hashing.
-        Strips timestamps and other dynamic content that shouldn't affect change detection.
+        Simplified approach - just remove scripts/styles and normalize whitespace.
         """
         soup = BeautifulSoup(html, 'lxml')
         
@@ -414,30 +347,13 @@ class ChangeDetector:
         for tag in soup(['script', 'style', 'noscript', 'iframe']):
             tag.decompose()
         
-        # Remove elements that commonly contain dynamic content
-        for selector in DYNAMIC_CONTENT_SELECTORS:
-            for element in soup.select(selector):
-                element.decompose()
-        
         # Get text content
         text = soup.get_text()
-        
-        # Remove common timestamp patterns
-        for pattern in TIMESTAMP_PATTERNS:
-            text = re.sub(pattern, '', text, flags=re.IGNORECASE)
-        
-        # Remove common dynamic content patterns
-        for pattern in DYNAMIC_CONTENT_PATTERNS:
-            text = re.sub(pattern, '', text, flags=re.IGNORECASE)
         
         # Remove excessive whitespace and normalize
         text = re.sub(r'\s+', ' ', text).strip()
         
-        # Remove very short words that might be artifacts
-        words = text.split()
-        words = [word for word in words if len(word) > 2 or word.isalpha()]
-        
-        return ' '.join(words)
+        return text
     
     def _get_last_revision(self, page_id: str) -> Optional[Dict]:
         """Get the most recent revision for a page."""
@@ -507,19 +423,7 @@ class ChangeDetector:
                     
                     return old_revision_id  # Return existing revision ID
             
-            # Extract additional metadata
-            soup = BeautifulSoup(content, 'lxml')
-            headings = [h.get_text(strip=True) for h in soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])]
-            
-            # Count links
-            internal_links = len([a for a in soup.find_all('a', href=True) 
-                                if a.get('href') and not a.get('href').startswith(('http://', 'https://', 'mailto:', 'tel:'))])
-            external_links = len([a for a in soup.find_all('a', href=True) 
-                                if a.get('href') and a.get('href').startswith(('http://', 'https://'))])
-            
-            # Word count
-            word_count = len(normalized_content.split())
-            
+            # Create revision data with minimal metadata
             revision_data = {
                 'page_id': page_id,
                 'run_id': self.run_id,
@@ -527,13 +431,6 @@ class ChangeDetector:
                 'content_sha256': content_hash,
                 'title': title,
                 'meta_description': description,
-                'canonical': None,  # Will be set if found
-                'extracted_jsonld': None,  # Will be set if found
-                'headings': headings,
-                'internal_links': internal_links,
-                'external_links': external_links,
-                'word_count': word_count,
-                'processed': True,
                 'metadata': metadata or {}
             }
             

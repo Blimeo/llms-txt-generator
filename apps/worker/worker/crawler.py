@@ -123,23 +123,18 @@ def is_same_domain(seed: str, url: str) -> bool:
 
 
 def extract_text_and_meta(html: str, url: str) -> Dict[str, Any]:
+    """Extract only the metadata needed for LLMS.txt generation."""
     soup = BeautifulSoup(html, "lxml")
     title_tag = soup.find("title")
     title = title_tag.get_text(strip=True) if title_tag else ""
+    
     # meta description
     meta_desc = ""
     md = soup.find("meta", attrs={"name": "description"})
     if md and md.get("content"):
         meta_desc = md.get("content").strip()
-    # headings
-    headings = [h.get_text(strip=True) for h in soup.find_all(re.compile("^h[1-6]$"))]
-    # main text (simple)
-    for s in soup(["script", "style", "noscript", "iframe"]):
-        s.decompose()
-    body = soup.body
-    text = body.get_text(separator=" ", strip=True) if body else soup.get_text(separator=" ", strip=True)
-    snippet = text[:400] + ("…" if len(text) > 400 else "")
-    return {"title": title, "description": meta_desc, "headings": headings, "text_snippet": snippet, "full_text": text}
+    
+    return {"title": title, "description": meta_desc}
 
 
 def _create_page_record(project_id: str, page_info: Dict) -> Optional[str]:
@@ -245,18 +240,13 @@ def crawl_with_change_detection(
                 old_revision_id = None  # New page has no old revision
             
             if page_id:
-                # Save revision with full content and diff tracking
+                # Save revision with minimal metadata
                 revision_id = change_detector.save_page_revision(
                     page_id=page_id,
                     content=r.text,
                     title=data["title"],
                     description=data["description"],
                     metadata={
-                        "status_code": r.status_code,
-                        "etag": r.headers.get('ETag'),
-                        "last_modified": r.headers.get('Last-Modified'),
-                        "content_type": r.headers.get('Content-Type'),
-                        "content_length": r.headers.get('Content-Length'),
                         "change_reason": page_info.get('change_reason', 'Unknown')
                     },
                     old_revision_id=old_revision_id
@@ -266,14 +256,10 @@ def crawl_with_change_detection(
                     # Add to crawled pages for result
                     crawled_pages.append({
                         "url": url,
-                        "status_code": r.status_code,
                         "title": data["title"],
                         "description": data["description"],
-                        "headings": data["headings"],
-                        "snippet": data["text_snippet"],
                         "page_id": page_id,
-                        "revision_id": revision_id,
-                        "change_reason": page_info.get('change_reason', 'Unknown')
+                        "revision_id": revision_id
                     })
             
             # Rate limiting

@@ -140,10 +140,22 @@ def update_run_status(run_id: str, status: str, project_id: str, is_scheduled: b
         if result.data:
             logger.info(f"Updated run {run_id} status to {status}")
             
+            # Update last_run_at in project_configs for all completed runs
+            if status in [RUN_STATUS_COMPLETE_NO_DIFFS, RUN_STATUS_COMPLETE_WITH_DIFFS, RUN_STATUS_FAILED] and project_id:
+                current_time = datetime.utcnow().isoformat()
+                config_update_result = supabase.table("project_configs").update({
+                    "last_run_at": current_time
+                }).eq("project_id", project_id).execute()
+                
+                if config_update_result.data:
+                    logger.info(f"Updated last_run_at for project {project_id}")
+                else:
+                    logger.warning(f"Failed to update last_run_at for project {project_id}")
+            
             # If run completed successfully, is_scheduled is True, and we have project_id, schedule the next run
             if status in [RUN_STATUS_COMPLETE_NO_DIFFS, RUN_STATUS_COMPLETE_WITH_DIFFS] and is_scheduled and project_id:
                 logger.info(f"Scheduling next run for project {project_id} after successful completion of run {run_id}")
-                schedule_next_run(project_id, run_id)
+                schedule_next_run(project_id)
             elif status in [RUN_STATUS_COMPLETE_NO_DIFFS, RUN_STATUS_COMPLETE_WITH_DIFFS] and not is_scheduled:
                 logger.info(f"Skipping next run scheduling for immediate job run {run_id}")
             
