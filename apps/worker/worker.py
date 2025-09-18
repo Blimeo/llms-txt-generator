@@ -94,12 +94,13 @@ def process_job_payload(job: dict):
     project_id = job.get("projectId")
     run_id = job.get("runId")  # This should be passed from the API
     is_scheduled = job.get("isScheduled", False)  # Whether this is a scheduled job
+    is_initial_run = job.get("isInitialRun", False)  # Whether this is the initial run for a new project
     
     if not job_id or not url or not project_id or not run_id:
         raise ValueError("job must contain id+url+project id+run id")
     
     # Update run status to IN_PROGRESS
-    update_run_status(run_id, RUN_STATUS_IN_PROGRESS, project_id, is_scheduled)
+    update_run_status(run_id, RUN_STATUS_IN_PROGRESS, project_id, is_scheduled, is_initial_run)
 
     # crawl site with change detection
     crawl_opts = {
@@ -119,7 +120,7 @@ def process_job_payload(job: dict):
     # If no changes detected, we can skip llms.txt generation
     if not crawl_result.get("changes_detected", True):
         logger.info("No changes detected, skipping llms.txt generation")
-        update_run_status(run_id, RUN_STATUS_COMPLETE_NO_DIFFS, project_id, is_scheduled, "No changes detected, skipping generation")
+        update_run_status(run_id, RUN_STATUS_COMPLETE_NO_DIFFS, project_id, is_scheduled, is_initial_run, "No changes detected, skipping generation")
         return {
             "s3_url_txt": None,
             "pages_crawled": 0,
@@ -137,7 +138,7 @@ def process_job_payload(job: dict):
     changes_detected = crawl_result.get("changes_detected", True)
     txt_filename = f"{LLMS_TXT_FILENAME_PREFIX}{job_id}{LLMS_TXT_FILENAME_SUFFIX}"
     
-    s3_url_txt = maybe_upload_s3_from_memory(txt_content, txt_filename, run_id, project_id, changes_detected, is_scheduled)
+    s3_url_txt = maybe_upload_s3_from_memory(txt_content, txt_filename, run_id, project_id, changes_detected, is_scheduled, is_initial_run)
 
     result = {
         "s3_url_txt": s3_url_txt,

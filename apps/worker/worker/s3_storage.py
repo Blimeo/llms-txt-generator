@@ -47,10 +47,6 @@ def upload_content_to_s3(content: str, filename: str) -> Optional[str]:
         region_name=S3_REGION,
     )
     
-    logger.debug('SUPABASE_PROJECT_ID = %s', os.environ.get(ENV_SUPABASE_PROJECT_ID))
-    logger.debug('AWS_ACCESS_KEY_ID = %s', os.environ.get(ENV_AWS_ACCESS_KEY_ID))
-    logger.debug('AWS_SECRET_ACCESS_KEY = %s', os.environ.get(ENV_AWS_SECRET_ACCESS_KEY))
-
     key = filename
     extra_args = {"ACL": "private"}
     

@@ -14,7 +14,10 @@ from .constants import (
     CLOUD_TASKS_PROJECT_ID,
     CLOUD_TASKS_LOCATION,
     CLOUD_TASKS_QUEUE_NAME,
-    ENV_WORKER_URL
+    ENV_WORKER_URL,
+    ENV_CLOUD_TASKS_PROJECT_ID,
+    ENV_CLOUD_TASKS_LOCATION,
+    ENV_CLOUD_TASKS_QUEUE_NAME
 )
 
 logger = logging.getLogger(__name__)
@@ -25,11 +28,12 @@ class CloudTasksClient:
     def __init__(self):
         """Initialize the Cloud Tasks client"""
         self.client = tasks_v2.CloudTasksClient()
-        self.project_id = CLOUD_TASKS_PROJECT_ID
-        self.location = CLOUD_TASKS_LOCATION
-        self.queue_name = CLOUD_TASKS_QUEUE_NAME
+        # Read from environment variables with fallback to constants
+        self.project_id = os.environ.get(ENV_CLOUD_TASKS_PROJECT_ID, CLOUD_TASKS_PROJECT_ID)
+        self.location = os.environ.get(ENV_CLOUD_TASKS_LOCATION, CLOUD_TASKS_LOCATION)
+        self.queue_name = os.environ.get(ENV_CLOUD_TASKS_QUEUE_NAME, CLOUD_TASKS_QUEUE_NAME)
         self.queue_path = self.client.queue_path(
-            CLOUD_TASKS_PROJECT_ID, CLOUD_TASKS_LOCATION, CLOUD_TASKS_QUEUE_NAME
+            self.project_id, self.location, self.queue_name
         )
         
     def schedule_job(self, job: Dict[str, Any], scheduled_at: datetime) -> Optional[str]:
@@ -68,7 +72,7 @@ class CloudTasksClient:
                     self.project_id, 
                     self.location, 
                     self.queue_name, 
-                    job["id"]
+                    job["runId"]
                 ),
             }
             

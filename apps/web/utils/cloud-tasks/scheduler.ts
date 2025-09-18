@@ -173,6 +173,7 @@ export interface TaskJob {
   render_mode?: string
   scheduledAt?: number // Unix timestamp for future execution
   isScheduled: boolean // Whether this is a scheduled job or immediate job
+  isInitialRun?: boolean // Whether this is the initial run for a new project
   metadata?: any
 }
 
@@ -198,7 +199,7 @@ export async function enqueueImmediateJob(job: Omit<TaskJob, 'scheduledAt'>) {
         body: Buffer.from(JSON.stringify(jobWithScheduledFlag)).toString('base64'),
       },
       // Add task name for deduplication
-      name: client.taskPath(PROJECT_ID, LOCATION, QUEUE_NAME, job.id),
+      name: client.taskPath(PROJECT_ID, LOCATION, QUEUE_NAME, job.runId),
     }
     console.log('task', task)
     try {
@@ -238,7 +239,7 @@ export async function enqueueImmediateJob(job: Omit<TaskJob, 'scheduledAt'>) {
         nanos: (job.scheduledAt % 1000) * 1000000,
       },
       // Add task name for deduplication
-      name: client.taskPath(PROJECT_ID, LOCATION, QUEUE_NAME, job.id),
+      name: client.taskPath(PROJECT_ID, LOCATION, QUEUE_NAME, job.runId),
     }
   
     try {
@@ -266,6 +267,28 @@ export async function cancelScheduledJob(jobId: string) {
     console.error('Error deleting Cloud Task:', error)
     return false
   }
+}
+
+/**
+ * Delete multiple tasks from Cloud Tasks queue
+ */
+export async function deleteTasks(runIds: string[]) {
+  const client = await getClient()
+  const results = []
+  
+  for (const runId of runIds) {
+    try {
+      const taskName = client.taskPath(PROJECT_ID, LOCATION, QUEUE_NAME, runId)
+      await client.deleteTask({ name: taskName })
+      console.log(`Deleted task: ${taskName}`)
+      results.push({ runId, success: true })
+    } catch (error) {
+      console.error(`Error deleting task for run ${runId}:`, error)
+      results.push({ runId, success: false, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+  
+  return results
 }
 
 /**

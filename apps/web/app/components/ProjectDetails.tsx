@@ -48,9 +48,6 @@ export default function ProjectDetails({
             <span className="font-medium">Next run:</span> {new Date(config.next_run_at).toLocaleString()}
           </div>
         )}
-        {project.is_public && (
-          <div className="text-green-600 font-medium">Public Project</div>
-        )}
       </div>
     </div>
   )

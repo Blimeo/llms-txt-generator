@@ -56,7 +56,7 @@ def get_latest_llms_txt_url(project_id: str) -> Optional[str]:
 
 
 def maybe_upload_s3_from_memory(content: str, filename: str, run_id: str, project_id: str, 
-                                changes_detected: bool = True, is_scheduled: bool = False) -> Optional[str]:
+                                changes_detected: bool = True, is_scheduled: bool = False, is_initial_run: bool = False) -> Optional[str]:
     """
     Upload content directly from memory to S3 and return public URL.
     Also updates the database with artifact information and run status.
@@ -68,6 +68,7 @@ def maybe_upload_s3_from_memory(content: str, filename: str, run_id: str, projec
         project_id: The project ID
         changes_detected: Whether changes were detected
         is_scheduled: Whether this is a scheduled run
+        is_initial_run: Whether this is the initial run for a new project
         
     Returns:
         Public URL if successful, None otherwise
@@ -90,7 +91,7 @@ def maybe_upload_s3_from_memory(content: str, filename: str, run_id: str, projec
         summary = f"Successfully generated llms.txt file. Artifact: {public_url}"
         
         # Use the centralized update_run_status function which handles scheduling
-        success = update_run_status(run_id, status, project_id, is_scheduled, summary, public_url)
+        success = update_run_status(run_id, status, project_id, is_scheduled, is_initial_run, summary, public_url)
         if not success:
             logger.error(f"Failed to update run {run_id} status")
             
@@ -101,10 +102,10 @@ def maybe_upload_s3_from_memory(content: str, filename: str, run_id: str, projec
         return None
 
 
-def update_run_status(run_id: str, status: str, project_id: str, is_scheduled: bool = False, summary: str = None, 
-                     llms_txt_url: str = None) -> bool:
+def update_run_status(run_id: str, status: str, project_id: str, is_scheduled: bool = False, is_initial_run: bool = False, 
+                     summary: str = None, llms_txt_url: str = None) -> bool:
     """
-    Update run status in the database with optional summary and conditionally schedule next run based on is_scheduled flag.
+    Update run status in the database with optional summary and conditionally schedule next run based on is_scheduled or is_initial_run flags.
     This is the unified function that handles all run status updates and conditional scheduling.
     Optimized to minimize database operations.
     
@@ -113,6 +114,7 @@ def update_run_status(run_id: str, status: str, project_id: str, is_scheduled: b
         status: The new status (e.g., "IN_PROGRESS", "COMPLETE_NO_DIFFS", "COMPLETE_WITH_DIFFS", "FAILED")
         project_id: The project ID (required for scheduling and webhook calls)
         is_scheduled: Whether this is a scheduled run (affects next run scheduling)
+        is_initial_run: Whether this is the initial run for a new project (will schedule next run if true)
         summary: Optional summary message. If not provided, defaults will be used based on status.
         llms_txt_url: URL to the generated llms.txt file (required for webhook calls)
     """
@@ -152,11 +154,16 @@ def update_run_status(run_id: str, status: str, project_id: str, is_scheduled: b
                 else:
                     logger.warning(f"Failed to update last_run_at for project {project_id}")
             
-            # If run completed successfully, is_scheduled is True, and we have project_id, schedule the next run
-            if status in [RUN_STATUS_COMPLETE_NO_DIFFS, RUN_STATUS_COMPLETE_WITH_DIFFS] and is_scheduled and project_id:
-                logger.info(f"Scheduling next run for project {project_id} after successful completion of run {run_id}")
+            # If run completed successfully and we have project_id, schedule the next run if:
+            # 1. This is a scheduled run (is_scheduled=True), OR
+            # 2. This is an initial run (is_initial_run=True)
+            if status in [RUN_STATUS_COMPLETE_NO_DIFFS, RUN_STATUS_COMPLETE_WITH_DIFFS] and project_id and (is_scheduled or is_initial_run):
+                if is_initial_run:
+                    logger.info(f"Scheduling next run for project {project_id} after successful completion of initial run {run_id}")
+                else:
+                    logger.info(f"Scheduling next run for project {project_id} after successful completion of scheduled run {run_id}")
                 schedule_next_run(project_id)
-            elif status in [RUN_STATUS_COMPLETE_NO_DIFFS, RUN_STATUS_COMPLETE_WITH_DIFFS] and not is_scheduled:
+            elif status in [RUN_STATUS_COMPLETE_NO_DIFFS, RUN_STATUS_COMPLETE_WITH_DIFFS] and not is_scheduled and not is_initial_run:
                 logger.info(f"Skipping next run scheduling for immediate job run {run_id}")
             
             # Call webhooks for completed runs

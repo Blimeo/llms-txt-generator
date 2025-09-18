@@ -63,7 +63,6 @@ export async function GET() {
         name,
         domain,
         description,
-        is_public,
         created_at,
         updated_at,
         metadata,
@@ -108,7 +107,6 @@ export async function POST(req: NextRequest) {
       name, 
       domain, 
       description, 
-      is_public = false,
       crawl_depth = 2,
       cron_expression = 'daily',
       is_enabled = true
@@ -135,7 +133,6 @@ export async function POST(req: NextRequest) {
         name,
         domain: domain.startsWith('http') ? domain : `https://${domain}`,
         description,
-        is_public,
         metadata: {}
       })
       .select()
@@ -185,9 +182,7 @@ export async function POST(req: NextRequest) {
 
         if (runError) {
           console.error('Error creating initial run:', runError)
-          // Don't fail the project creation, just log the error
         } else {
-          // Note: crawl_jobs table has been removed - job tracking is now handled by the worker directly
           // Generate job ID for Cloud Tasks
           const jobId = uuidv4()
           
@@ -198,7 +193,9 @@ export async function POST(req: NextRequest) {
             projectId: project.id,
             runId: run.id,
             priority: 'NORMAL',
-            render_mode: 'STATIC'
+            render_mode: 'STATIC',
+            isScheduled: false,
+            isInitialRun: true
           })
         }
       } catch (error) {

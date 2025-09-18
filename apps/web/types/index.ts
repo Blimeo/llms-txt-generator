@@ -6,7 +6,6 @@ export interface Project {
   name: string
   domain: string
   description: string | null
-  is_public: boolean
   created_at: string
   updated_at: string
   metadata: any

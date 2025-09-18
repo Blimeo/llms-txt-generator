@@ -338,7 +338,7 @@ export default function ProjectDetailPage() {
 
               {webhooks.length === 0 ? (
                 <div className="text-center py-4 text-gray-500 text-sm">
-                  No webhooks configured. Add one to get notified when llms.txt is generated.
+                  No webhooks configured. Add one to get notified when a new llms.txt is generated.
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -377,7 +377,7 @@ export default function ProjectDetailPage() {
                         </span>
                       </div>
                       <p className="text-xs text-gray-500 mt-1">
-                        The "Check for changes" button will check for site changes and attempt to invoke all webhooks
+                        "Check for changes" will enqueue a one-off run to update llms.txt and attempt to invoke all webhooks
                       </p>
                     </div>
                   ) : (
@@ -386,7 +386,7 @@ export default function ProjectDetailPage() {
                         Generated files when changes were detected
                       </p>
                       <p className="text-xs text-gray-500 mt-1">
-                        The "Check for changes" button will check for site changes and attempt to invoke all webhooks
+                        "Check for changes" will enqueue a one-off run to update llms.txt and attempt to invoke all webhooks
                       </p>
                     </div>
                   )}

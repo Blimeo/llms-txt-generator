@@ -8,23 +8,36 @@ on:
 
 permissions:
   contents: read
-  id-token: write # required for OIDC auth (if you use it)
+  id-token: write 
   packages: write
 
 env:
-  # set these to match your GCP / Artifact Registry layout
+  WORKER_DIR: apps/worker
+  # Supabase secrets for Auth
+  NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${{ secrets.NEXT_PUBLIC_GOOGLE_CLIENT_ID }}
+  # Supabase secrets for DB
+  NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+  SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+  # Supabase secrets for Object Storage
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  # Vercel deployment secrets
+  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+  # GCP secrets
+  GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }} # GCP service account key
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   REGION: ${{ secrets.GCP_REGION }}            # e.g. us-central1
   REPOSITORY: ${{ secrets.ARTIFACT_REPOSITORY }} # e.g. worker-repo
   SERVICE: llms-worker    # e.g. llms-worker
-  WORKER_DIR: apps/worker
-  NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-  NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${{ secrets.NEXT_PUBLIC_GOOGLE_CLIENT_ID }}
-  SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
-  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-  WORKER_URL: ${{ secrets.WORKER_URL }}
+  WORKER_URL: ${{ secrets.WORKER_URL }} # Worker URL created when deploying to Cloud Run
+  # Cloud Tasks secrets
+  CLOUD_TASKS_PROJECT_ID: ${{ secrets.CLOUD_TASKS_PROJECT_ID }}
+  CLOUD_TASKS_LOCATION: ${{ secrets.CLOUD_TASKS_LOCATION }}
+  CLOUD_TASKS_QUEUE_NAME: ${{ secrets.CLOUD_TASKS_QUEUE_NAME }}
+
 
 jobs:
   build-test:
@@ -86,9 +99,9 @@ jobs:
       - name: Deploy to Vercel
         uses: amondnet/vercel-action@v20
         with:
-          vercel-token: ${{ secrets.VERCEL_TOKEN }}
-          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
-          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-token: ${{ env.VERCEL_TOKEN }}
+          vercel-org-id: ${{ env.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ env.VERCEL_PROJECT_ID }}
 
   deploy-worker:
     needs: build-test
@@ -103,7 +116,7 @@ jobs:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v1
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          credentials_json: ${{ env.GCP_SA_KEY }}
 
       # Docker login to Artifact Registry (use the region-specific host)
       - name: Docker login to Artifact Registry
@@ -111,7 +124,7 @@ jobs:
         with:
           registry: ${{ env.REGION }}-docker.pkg.dev
           username: _json_key
-          password: ${{ secrets.GCP_SA_KEY }}
+          password: ${{ env.GCP_SA_KEY }}
 
       - name: Set image name
         id: image
@@ -146,5 +159,8 @@ jobs:
             AWS_ACCESS_KEY_ID=${{ env.AWS_ACCESS_KEY_ID }}
             AWS_SECRET_ACCESS_KEY=${{ env.AWS_SECRET_ACCESS_KEY }}
             WORKER_URL=${{ env.WORKER_URL }}
+            CLOUD_TASKS_PROJECT_ID=${{ env.CLOUD_TASKS_PROJECT_ID }}
+            CLOUD_TASKS_LOCATION=${{ env.CLOUD_TASKS_LOCATION }}
+            CLOUD_TASKS_QUEUE_NAME=${{ env.CLOUD_TASKS_QUEUE_NAME }}
 
 

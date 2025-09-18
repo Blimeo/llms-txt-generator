@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '../../../../utils/supabase/server'
 import { cookies } from 'next/headers'
+import { deleteTasks } from '../../../../utils/cloud-tasks/scheduler'
 
 // GET /api/projects/[id] - Get a specific project
 export async function GET(
@@ -27,7 +28,6 @@ export async function GET(
         name,
         domain,
         description,
-        is_public,
         created_at,
         updated_at,
         metadata,
@@ -80,7 +80,6 @@ export async function PUT(
       name, 
       domain, 
       description, 
-      is_public,
       crawl_depth
     } = body
 
@@ -108,7 +107,6 @@ export async function PUT(
       }
     }
     if (description !== undefined) projectUpdateData.description = description
-    if (is_public !== undefined) projectUpdateData.is_public = is_public
 
     if (Object.keys(projectUpdateData).length > 0) {
       const { error: projectError } = await supabase
@@ -172,6 +170,39 @@ export async function DELETE(
 
     if (checkError || !existingProject) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
+
+    // Get all queued runs for this project
+    const { data: queuedRuns, error: runsError } = await supabase
+      .from('runs')
+      .select('id')
+      .eq('project_id', projectId)
+      .in('status', ['QUEUED', 'IN_PROGRESS'])
+
+    if (runsError) {
+      console.error('Error fetching queued runs:', runsError)
+      return NextResponse.json({ error: 'Failed to fetch queued runs' }, { status: 500 })
+    }
+
+    // Delete queued runs from Cloud Tasks if any exist
+    if (queuedRuns && queuedRuns.length > 0) {
+      const runIds = queuedRuns.map(run => run.id)
+      console.log(`Deleting ${runIds.length} queued tasks from Cloud Tasks for project ${projectId}`)
+      
+      try {
+        const deleteResults = await deleteTasks(runIds)
+        const failedDeletes = deleteResults.filter(result => !result.success)
+        
+        if (failedDeletes.length > 0) {
+          console.warn(`Failed to delete ${failedDeletes.length} tasks from Cloud Tasks:`, failedDeletes)
+          // Continue with project deletion even if some tasks couldn't be deleted
+        } else {
+          console.log(`Successfully deleted all ${runIds.length} queued tasks from Cloud Tasks`)
+        }
+      } catch (error) {
+        console.error('Error deleting tasks from Cloud Tasks:', error)
+        // Continue with project deletion even if Cloud Tasks deletion fails
+      }
     }
 
     // Delete project (cascade will handle related records)

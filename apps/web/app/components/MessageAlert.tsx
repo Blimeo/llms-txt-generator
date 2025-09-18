@@ -1,6 +1,6 @@
 'use client'
 
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 
 interface MessageAlertProps {
   message: string | null
@@ -8,7 +8,21 @@ interface MessageAlertProps {
 }
 
 export default function MessageAlert({ message, type = 'info' }: MessageAlertProps) {
-  if (!message) return null
+  const [isVisible, setIsVisible] = useState(true)
+
+  useEffect(() => {
+    if (message) {
+      setIsVisible(true)
+      
+      const timer = setTimeout(() => {
+        setIsVisible(false)
+      }, 5000)
+
+      return () => clearTimeout(timer)
+    }
+  }, [message])
+
+  if (!message || !isVisible) return null
 
   const getAlertClasses = () => {
     switch (type) {
@@ -26,7 +40,7 @@ export default function MessageAlert({ message, type = 'info' }: MessageAlertPro
   const alertType = isSuccess ? 'success' : 'error'
 
   return (
-    <div className={`mb-4 p-4 rounded ${getAlertClasses()}`}>
+    <div className={`mb-4 p-4 rounded transition-opacity duration-500 ease-in-out ${getAlertClasses()}`}>
       {message}
     </div>
   )

@@ -37,17 +37,6 @@ BEGIN
   END IF;
 END$$;
 
--- Page change types detected in diffs (valid values):
---   CREATED  : page newly discovered in this run
---   MODIFIED : page content hash changed
---   REMOVED  : page no longer present / 404
---   UNCHANGED: page present and hash unchanged
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'change_type') THEN
-    CREATE TYPE change_type AS ENUM ('CREATED', 'MODIFIED', 'REMOVED', 'UNCHANGED');
-  END IF;
-END$$;
 
 -- Artifact types for generated outputs:
 --   LLMS_TXT : the generated llms.txt textual artifact
@@ -81,7 +70,6 @@ CREATE TABLE IF NOT EXISTS projects (
   description text,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  is_public boolean NOT NULL DEFAULT false,
   metadata jsonb DEFAULT '{}'::jsonb
 );
 
@@ -99,21 +87,6 @@ CREATE TABLE IF NOT EXISTS project_configs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_project_configs_project ON project_configs(project_id);
-
-
--- ======================================================
--- SCHEDULES & WEBHOOKS
--- ======================================================
-CREATE TABLE IF NOT EXISTS schedules (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  cron_expression text NOT NULL,
-  last_run_at timestamptz,
-  next_run_at timestamptz,
-  is_enabled boolean NOT NULL DEFAULT true,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
-);
 
 CREATE TABLE IF NOT EXISTS webhooks (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -194,28 +167,6 @@ ALTER TABLE pages
   ADD COLUMN IF NOT EXISTS current_revision_id uuid REFERENCES page_revisions(id) ON DELETE SET NULL;
 
 -- ======================================================
--- DIFFS
--- ======================================================
-CREATE TABLE IF NOT EXISTS diffs (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  run_id uuid REFERENCES runs(id) ON DELETE CASCADE,
-  page_id uuid REFERENCES pages(id) ON DELETE CASCADE,
-  from_revision_id uuid REFERENCES page_revisions(id) ON DELETE SET NULL,
-  to_revision_id uuid REFERENCES page_revisions(id) ON DELETE SET NULL,
-  change_type change_type NOT NULL DEFAULT 'MODIFIED',
-  summary text,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  metadata jsonb DEFAULT '{}'::jsonb
-);
-CREATE INDEX IF NOT EXISTS idx_diffs_run ON diffs(run_id);
-CREATE INDEX IF NOT EXISTS idx_diffs_page ON diffs(page_id);
-
--- ======================================================
--- CRAWL JOBS (REMOVED)
--- ======================================================
--- The crawl_jobs table has been removed. Job tracking is now handled by the worker directly.
-
--- ======================================================
 -- ARTIFACTS & EXPORTS
 -- ======================================================
 CREATE TABLE IF NOT EXISTS artifacts (
@@ -247,20 +198,6 @@ CREATE TABLE IF NOT EXISTS webhook_events (
 );
 
 -- ======================================================
--- API KEYS & INTEGRATIONS
--- ======================================================
-CREATE TABLE IF NOT EXISTS api_keys (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id uuid REFERENCES projects(id) ON DELETE CASCADE,
-  name text NOT NULL,
-  key_hash text NOT NULL,
-  scopes text[] DEFAULT ARRAY['read']::text[],
-  is_active boolean NOT NULL DEFAULT true,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  last_used_at timestamptz
-);
-
--- ======================================================
 -- INDEXES & PERFORMANCE HINTS
 -- ======================================================
 CREATE INDEX IF NOT EXISTS idx_projects_metadata_gin ON projects USING gin (metadata jsonb_path_ops);
@@ -286,18 +223,3 @@ DROP TRIGGER IF EXISTS trg_runs_updated_at ON runs;
 CREATE TRIGGER trg_runs_updated_at
   BEFORE UPDATE ON runs
   FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
-
--- crawl_jobs trigger removed (table no longer exists)
-
-DROP TRIGGER IF EXISTS trg_schedules_updated_at ON schedules;
-CREATE TRIGGER trg_schedules_updated_at
-  BEFORE UPDATE ON schedules
-  FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
-
--- ======================================================
--- FINAL NOTES
--- ======================================================
--- • The job_queue table has been removed per your request. Use Redis for queueing.
--- • The crawl_jobs table has been removed. Job tracking is now handled by the worker directly.
--- • If you want a lightweight durable trace, consider writing an append-only "job_logs" table when you enqueue (optional).
--- ======================================================
