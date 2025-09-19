@@ -401,7 +401,7 @@ class ChangeDetector:
     def save_page_revision(self, page_id: str, content: str, title: str = "", 
                           description: str = "", metadata: Dict = None, 
                           old_revision_id: str = None) -> str:
-        """Save a new page revision to the database and create diff record."""
+        """Save a new page revision to the database."""
         try:
             # Extract normalized content for hashing
             normalized_content = self._extract_normalized_content(content)

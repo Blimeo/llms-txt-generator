@@ -1,14 +1,27 @@
 'use client'
 
 import React from 'react'
+import { useRouter } from 'next/navigation'
 import type { ProjectCardProps } from '@/types'
 import { getScheduleDisplayText, getProjectConfig } from '../utils/helpers'
 
 export default function ProjectCard({ project, onDelete, deleteLoading }: ProjectCardProps) {
   const config = getProjectConfig(project)
+  const router = useRouter()
+
+  const handleCardClick = (e: React.MouseEvent) => {
+    // Don't navigate if clicking on interactive elements
+    if ((e.target as HTMLElement).closest('a, button')) {
+      return
+    }
+    router.push(`/projects/${project.id}`)
+  }
 
   return (
-    <div className="border rounded-lg p-4 hover:shadow-md transition-shadow">
+    <div 
+      className="border rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
+      onClick={handleCardClick}
+    >
       <div className="flex justify-between items-start">
         <div className="flex-1">
           <h3 className="text-lg font-semibold">{project.name}</h3>
@@ -44,7 +57,10 @@ export default function ProjectCard({ project, onDelete, deleteLoading }: Projec
             View Details
           </a>
           <button
-            onClick={() => onDelete(project.id)}
+            onClick={(e) => {
+              e.stopPropagation()
+              onDelete(project.id)
+            }}
             disabled={deleteLoading === project.id}
             className="px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700 disabled:opacity-50"
           >

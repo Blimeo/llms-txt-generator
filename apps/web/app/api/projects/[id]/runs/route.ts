@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '../../../../../utils/supabase/server'
 import { cookies } from 'next/headers'
 import { v4 as uuidv4 } from 'uuid'
-import { enqueueImmediateJob, scheduleJob } from '../../../../../utils/cloud-tasks/scheduler'
+import { enqueueImmediateJob } from '../../../../../utils/cloud-tasks/scheduler'
 
 // GET /api/projects/[id]/runs - List all runs for a project
 export async function GET(

@@ -87,7 +87,7 @@ The worker is a Python-based HTTP server deployed on Google Cloud Run that handl
 ### Environment Variables
 
 Create a `.env` file in the project root with the following variables.
-In addition, they must all be configured as repo secrets on Github.
+In addition, they must all be configured as repo secrets on Github. You must also upload the .env file to the Vercel environment variables page.
 
 ```bash
 # Supabase Configuration
@@ -166,7 +166,7 @@ npm run dev
 uv run worker.py
 ```
 
-The worker will start an HTTP server on port 8080 (configurable via `PORT` environment variable). It can be tested with test_worker.py, which creates a valid project/run in the Supabase DB before 
+The worker will start an HTTP server on port 8080 (configurable via `PORT` environment variable).
 
 ## Dependencies
 

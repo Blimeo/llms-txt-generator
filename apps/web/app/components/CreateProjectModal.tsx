@@ -11,9 +11,40 @@ export default function CreateProjectModal({ isOpen, onClose, onSubmit, loading 
     crawl_depth: 2,
     cron_expression: 'daily'
   })
+  const [domainError, setDomainError] = useState<string | null>(null)
+
+  // URL validation regex
+  const urlRegex = /^https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)$/
+
+  const validateDomain = (domain: string) => {
+    if (!domain.trim()) {
+      setDomainError(null)
+      return true
+    }
+    
+    if (!urlRegex.test(domain)) {
+      setDomainError('Please enter a valid URL (e.g., https://example.com)')
+      return false
+    }
+    
+    setDomainError(null)
+    return true
+  }
+
+  const handleDomainChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value
+    setFormData({ ...formData, domain: value })
+    validateDomain(value)
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    
+    // Validate domain before submission
+    if (!validateDomain(formData.domain)) {
+      return
+    }
+    
     await onSubmit(formData)
     // Reset form after successful submission
     setFormData({
@@ -23,6 +54,7 @@ export default function CreateProjectModal({ isOpen, onClose, onSubmit, loading 
       crawl_depth: 2,
       cron_expression: 'daily'
     })
+    setDomainError(null)
   }
 
   if (!isOpen) return null
@@ -48,11 +80,22 @@ export default function CreateProjectModal({ isOpen, onClose, onSubmit, loading 
             <input
               type="url"
               value={formData.domain}
-              onChange={(e) => setFormData({ ...formData, domain: e.target.value })}
+              onChange={handleDomainChange}
               placeholder="https://example.com"
-              className="border rounded p-2 w-full text-gray-900"
+              className={`border rounded p-2 w-full text-gray-900 ${
+                domainError ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : ''
+              }`}
               required
             />
+            {domainError ? (
+              <p className="text-xs text-red-500 mt-1">
+                {domainError}
+              </p>
+            ) : (
+              <p className="text-xs text-gray-500 mt-1">
+                Only static sites are currently supported.
+              </p>
+            )}
           </div>
 
           <div>
@@ -105,7 +148,7 @@ export default function CreateProjectModal({ isOpen, onClose, onSubmit, loading 
             </button>
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || !!domainError}
               className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
             >
               {loading ? 'Creating...' : 'Create Project'}

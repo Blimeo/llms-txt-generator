@@ -1,7 +1,7 @@
 'use client'
 
 import React from 'react'
-import type { RunCardProps, RunStatus } from '@/types'
+import type { RunCardProps } from '@/types'
 import { getStatusColor, getStatusDisplayText, formatDate } from '../utils/helpers'
 
 export default function RunCard({ run, projectId, isLatest = false }: RunCardProps) {

@@ -25,8 +25,6 @@ export interface ProjectWithConfig extends Project {
 }
 
 // Run related types
-export type RunStatus = 'QUEUED' | 'IN_PROGRESS' | 'RETRYING' | 'FAILED' | 'COMPLETE_NO_DIFFS' | 'COMPLETE_WITH_DIFFS'
-
 export interface Run {
   id: string
   project_id: string
@@ -34,7 +32,7 @@ export interface Run {
   started_at: string | null
   finished_at: string | null
   summary: string | null
-  status: RunStatus
+  status: string
   created_at: string
   updated_at: string
   metrics: any
@@ -75,10 +73,6 @@ export interface WebhookFormData {
 }
 
 // Component prop types
-export interface NavigationProps {
-  user: User | null
-  onSignOut: () => void
-}
 
 export interface ProjectCardProps {
   project: ProjectWithConfig
@@ -125,12 +119,3 @@ export interface ProjectDetailsProps {
 }
 
 // Utility types
-export interface MessageState {
-  message: string | null
-  setMessage: (message: string | null) => void
-}
-
-export interface LoadingState {
-  loading: boolean
-  setLoading: (loading: boolean) => void
-}
