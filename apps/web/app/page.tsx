@@ -126,12 +126,16 @@ export default function HomePage() {
               </div>
               <div className="bg-gray-900 rounded-lg p-6 text-green-400 font-mono text-sm">
                 <div className="text-gray-400 mb-2"># Example llms.txt</div>
-                <div>Content-Type: blog, documentation</div>
-                <div>Purpose: Educational resources</div>
-                <div>Last-Updated: 2024-01-15</div>
-                <div>Usage-Guidelines: Free for educational use</div>
-                <div>Contact: info@example.com</div>
-                <div>API-Endpoints: /api/docs, /api/status</div>
+                <div># FastHTML</div>
+                <div></div>
+                <div>&gt; Educational resources for learning web development</div>
+                <div></div>
+                <div>## Pages</div>
+                <div></div>
+                <div>- [Home](https://fasthtml.dev/): Learn FastHTML web framework</div>
+                <div>- [Documentation](https://fasthtml.dev/docs/): Complete API reference</div>
+                <div>- [Tutorials](https://fasthtml.dev/tutorials/): Step-by-step guides</div>
+                <div>- [Examples](https://fasthtml.dev/examples/): Code samples and demos</div>
               </div>
             </div>
           </div>

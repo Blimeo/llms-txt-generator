@@ -36,6 +36,13 @@ def generate_llms_text(crawl_result: Dict[str, Any], job_id: str) -> str:
                 from urllib.parse import urlparse
                 parsed = urlparse(start_url)
                 project_name = parsed.netloc or start_url
+    else:
+        # No pages available, try to extract domain name from start URL
+        start_url = crawl_result.get("start_url", "")
+        if start_url:
+            from urllib.parse import urlparse
+            parsed = urlparse(start_url)
+            project_name = parsed.netloc or start_url
     
     # Get project description from start page
     project_description = ""
@@ -46,6 +53,9 @@ def generate_llms_text(crawl_result: Dict[str, Any], job_id: str) -> str:
         else:
             # Fallback to a generic description
             project_description = f"Website content from {crawl_result.get('start_url', '')}"
+    else:
+        # No pages available, use generic description
+        project_description = f"Website content from {crawl_result.get('start_url', '')}"
     
     # Build LLMS.txt content
     lines = []

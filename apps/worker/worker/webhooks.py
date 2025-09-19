@@ -2,7 +2,7 @@
 """Webhook management and execution."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
 import requests
@@ -11,11 +11,9 @@ from .constants import (
     WEBHOOK_TIMEOUT,
     WEBHOOK_USER_AGENT,
     WEBHOOK_HEADER_SECRET,
-    WEBHOOK_CONTENT_TYPE,
-    TABLE_WEBHOOKS,
-    TABLE_WEBHOOK_EVENTS
+    WEBHOOK_CONTENT_TYPE
 )
-from .database import get_supabase_client
+from .data_fetcher import DataFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -30,37 +28,37 @@ def call_webhooks_for_project(project_id: str, run_id: str, llms_txt_url: str) -
         llms_txt_url: The URL to the generated llms.txt file
     """
     try:
-        supabase = get_supabase_client()
+        data_fetcher = DataFetcher()
         
         # Get all active webhooks for the project
-        webhook_result = supabase.table(TABLE_WEBHOOKS).select("*").eq("project_id", project_id).eq("is_active", True).execute()
+        webhooks = data_fetcher.get_active_webhooks(project_id)
         
-        if not webhook_result.data:
+        if not webhooks:
             logger.info(f"No active webhooks found for project {project_id}")
             return
         
-        webhooks = webhook_result.data
         logger.info(f"Found {len(webhooks)} active webhooks for project {project_id}")
         
         # Prepare the webhook payload
         payload = {
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
             "llms_txt_url": llms_txt_url
         }
         
         # Call each webhook
         for webhook in webhooks:
-            call_single_webhook(webhook, payload, run_id)
+            call_single_webhook(data_fetcher, webhook, payload, run_id)
             
     except Exception as e:
         logger.error(f"Error calling webhooks for project {project_id}: {e}")
 
 
-def call_single_webhook(webhook: Dict[str, Any], payload: Dict[str, Any], run_id: str) -> None:
+def call_single_webhook(data_fetcher: DataFetcher, webhook: Dict[str, Any], payload: Dict[str, Any], run_id: str) -> None:
     """
     Call a single webhook and log the result.
     
     Args:
+        data_fetcher: The data fetcher instance
         webhook: The webhook configuration from the database
         payload: The payload to send to the webhook
         run_id: The run ID for logging purposes
@@ -91,6 +89,7 @@ def call_single_webhook(webhook: Dict[str, Any], payload: Dict[str, Any], run_id
         
         # Log the webhook event
         log_webhook_event(
+            data_fetcher=data_fetcher,
             webhook_id=webhook_id,
             event_type="run.complete",
             payload=payload,
@@ -107,6 +106,7 @@ def call_single_webhook(webhook: Dict[str, Any], payload: Dict[str, Any], run_id
     except requests.exceptions.Timeout:
         logger.error(f"Webhook {webhook_id} timed out after {WEBHOOK_TIMEOUT} seconds")
         log_webhook_event(
+            data_fetcher=data_fetcher,
             webhook_id=webhook_id,
             event_type="run.complete",
             payload=payload,
@@ -117,6 +117,7 @@ def call_single_webhook(webhook: Dict[str, Any], payload: Dict[str, Any], run_id
     except requests.exceptions.RequestException as e:
         logger.error(f"Webhook {webhook_id} request failed: {e}")
         log_webhook_event(
+            data_fetcher=data_fetcher,
             webhook_id=webhook_id,
             event_type="run.complete",
             payload=payload,
@@ -127,6 +128,7 @@ def call_single_webhook(webhook: Dict[str, Any], payload: Dict[str, Any], run_id
     except Exception as e:
         logger.error(f"Unexpected error calling webhook {webhook_id}: {e}")
         log_webhook_event(
+            data_fetcher=data_fetcher,
             webhook_id=webhook_id,
             event_type="run.complete",
             payload=payload,
@@ -136,12 +138,13 @@ def call_single_webhook(webhook: Dict[str, Any], payload: Dict[str, Any], run_id
         )
 
 
-def log_webhook_event(webhook_id: str, event_type: str, payload: Dict[str, Any], 
+def log_webhook_event(data_fetcher: DataFetcher, webhook_id: str, event_type: str, payload: Dict[str, Any], 
                      status_code: Optional[int], response_body: Optional[str], run_id: str) -> None:
     """
     Log webhook event to the webhook_events table.
     
     Args:
+        data_fetcher: The data fetcher instance
         webhook_id: The webhook ID
         event_type: The event type (e.g., "run.complete")
         payload: The payload that was sent
@@ -150,20 +153,9 @@ def log_webhook_event(webhook_id: str, event_type: str, payload: Dict[str, Any],
         run_id: The run ID for context
     """
     try:
-        supabase = get_supabase_client()
+        success = data_fetcher.log_webhook_event(webhook_id, event_type, payload, status_code, response_body)
         
-        event_data = {
-            "webhook_id": webhook_id,
-            "event_type": event_type,
-            "payload": payload,
-            "status_code": status_code,
-            "response_body": response_body,
-            "attempted_at": datetime.utcnow().isoformat()
-        }
-        
-        result = supabase.table(TABLE_WEBHOOK_EVENTS).insert(event_data).execute()
-        
-        if result.data:
+        if success:
             logger.debug(f"Logged webhook event for webhook {webhook_id}")
         else:
             logger.error(f"Failed to log webhook event for webhook {webhook_id}")

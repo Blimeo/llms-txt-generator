@@ -2,7 +2,7 @@
 name = "llms-worker"
 version = "0.0.0"
 description = "Python worker for llms.txt generation"
-authors = [{name="Your Name", email="you@example.com"}]
+authors = [{name="Matthew Ye", email="matthew.ye4@gmail.com"}]
 requires-python = ">=3.11"
 dependencies = [
 "python-dotenv >= 1.0.0",
@@ -11,8 +11,13 @@ dependencies = [
 "lxml >=4.9.3",
 "boto3",
 "supabase >= 2.0.0",
-"google-cloud-tasks >= 2.16.0"
+"google-cloud-tasks >= 2.16.0",
+"pytest >= 7.0.0",
+"pytest-mock >= 3.10.0",
+"pytest-cov >= 4.0.0",
+"responses >= 0.23.0"
 ]
+
 
 
 [build-system]

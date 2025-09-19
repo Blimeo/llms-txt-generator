@@ -269,3 +269,7 @@ The system provides comprehensive logging for:
 - **Web Application**: User actions, API calls, authentication events
 - **Worker**: Crawling progress, change detection results, S3 uploads, webhook calls
 - **Database**: All operations are logged with timestamps and user context
+
+## Testing
+
+A comprehensive test suite of Jest tests for the frontend API and Pytest tests for the worker can be invoked with `npm run test` from the repo root.

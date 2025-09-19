@@ -2,66 +2,56 @@
 """Storage operations for S3 uploads, database updates, and scheduling."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from .constants import (
     RUN_STATUS_COMPLETE_NO_DIFFS,
     RUN_STATUS_COMPLETE_WITH_DIFFS,
-    RUN_STATUS_FAILED,
-    TABLE_RUNS,
-    TABLE_ARTIFACTS,
-    ARTIFACT_TYPE_LLMS_TXT
+    RUN_STATUS_FAILED
 )
-from .database import get_supabase_client
-from .s3_storage import upload_content_to_s3, create_artifact_record
+from .data_fetcher import DataFetcher
+from .s3_storage import upload_content_to_s3
 from .scheduling import schedule_next_run
 from .webhooks import call_webhooks_for_project
 
 logger = logging.getLogger(__name__)
 
 
-def get_latest_llms_txt_url(project_id: str) -> Optional[str]:
+def get_latest_llms_txt_url(data_fetcher: DataFetcher, project_id: str) -> Optional[str]:
     """
     Get the most recent llms.txt URL from the artifacts table for a project.
     
     Args:
+        data_fetcher: The data fetcher instance
         project_id: The project ID
         
     Returns:
         The most recent llms.txt URL if found, None otherwise
     """
     try:
-        supabase = get_supabase_client()
+        public_url = data_fetcher.get_latest_llms_txt_url(project_id)
         
-        # Query artifacts table for the most recent llms.txt artifact for this project
-        result = supabase.table(TABLE_ARTIFACTS).select("metadata").eq("project_id", project_id).eq("type", ARTIFACT_TYPE_LLMS_TXT).order("created_at", desc=True).limit(1).execute()
-        
-        if result.data and len(result.data) > 0:
-            metadata = result.data[0].get("metadata", {})
-            public_url = metadata.get("public_url")
-            if public_url:
-                logger.info(f"Found latest llms.txt URL for project {project_id}: {public_url}")
-                return public_url
-            else:
-                logger.warning(f"No public_url found in metadata for project {project_id}")
+        if public_url:
+            logger.info(f"Found latest llms.txt URL for project {project_id}: {public_url}")
         else:
             logger.warning(f"No llms.txt artifacts found for project {project_id}")
             
-        return None
+        return public_url
         
     except Exception as e:
         logger.error(f"Error getting latest llms.txt URL for project {project_id}: {e}")
         return None
 
 
-def maybe_upload_s3_from_memory(content: str, filename: str, run_id: str, project_id: str, 
+def maybe_upload_s3_from_memory(data_fetcher: DataFetcher, content: str, filename: str, run_id: str, project_id: str, 
                                 changes_detected: bool = True, is_scheduled: bool = False, is_initial_run: bool = False) -> Optional[str]:
     """
     Upload content directly from memory to S3 and return public URL.
     Also updates the database with artifact information and run status.
     
     Args:
+        data_fetcher: The data fetcher instance
         content: The content to upload
         filename: The filename for the S3 object
         run_id: The run ID
@@ -81,7 +71,7 @@ def maybe_upload_s3_from_memory(content: str, filename: str, run_id: str, projec
             return None
         
         # Create artifact record
-        artifact_id = create_artifact_record(project_id, run_id, filename, content, public_url)
+        artifact_id = data_fetcher.create_artifact_record(project_id, run_id, filename, content, public_url)
         if not artifact_id:
             logger.error("Failed to create artifact record")
             return None
@@ -91,7 +81,7 @@ def maybe_upload_s3_from_memory(content: str, filename: str, run_id: str, projec
         summary = f"Successfully generated llms.txt file. Artifact: {public_url}"
         
         # Use the centralized update_run_status function which handles scheduling
-        success = update_run_status(run_id, status, project_id, is_scheduled, is_initial_run, summary, public_url)
+        success = update_run_status(data_fetcher, run_id, status, project_id, is_scheduled, is_initial_run, summary, public_url)
         if not success:
             logger.error(f"Failed to update run {run_id} status")
             
@@ -102,7 +92,7 @@ def maybe_upload_s3_from_memory(content: str, filename: str, run_id: str, projec
         return None
 
 
-def update_run_status(run_id: str, status: str, project_id: str, is_scheduled: bool = False, is_initial_run: bool = False, 
+def update_run_status(data_fetcher: DataFetcher, run_id: str, status: str, project_id: str, is_scheduled: bool = False, is_initial_run: bool = False, 
                      summary: str = None, llms_txt_url: str = None) -> bool:
     """
     Update run status in the database with optional summary and conditionally schedule next run based on is_scheduled or is_initial_run flags.
@@ -110,6 +100,7 @@ def update_run_status(run_id: str, status: str, project_id: str, is_scheduled: b
     Optimized to minimize database operations.
     
     Args:
+        data_fetcher: The data fetcher instance
         run_id: The ID of the run to update
         status: The new status (e.g., "IN_PROGRESS", "COMPLETE_NO_DIFFS", "COMPLETE_WITH_DIFFS", "FAILED")
         project_id: The project ID (required for scheduling and webhook calls)
@@ -119,37 +110,22 @@ def update_run_status(run_id: str, status: str, project_id: str, is_scheduled: b
         llms_txt_url: URL to the generated llms.txt file (required for webhook calls)
     """
     try:
-        supabase = get_supabase_client()
+        # Prefix summary with "Generation failed:" for FAILED status
+        if status == RUN_STATUS_FAILED and summary:
+            summary = f"Generation failed: {summary}"
         
-        update_data = {
-            "status": status,
-            "updated_at": datetime.utcnow().isoformat()
-        }
+        # Update run status using data fetcher
+        success = data_fetcher.update_run_status(run_id, status, summary)
         
-        if status in [RUN_STATUS_COMPLETE_NO_DIFFS, RUN_STATUS_COMPLETE_WITH_DIFFS]:
-            update_data["finished_at"] = datetime.utcnow().isoformat()
-            if summary:
-                update_data["summary"] = summary
-        elif status == RUN_STATUS_FAILED:
-            update_data["finished_at"] = datetime.utcnow().isoformat()
-            if summary:
-                update_data["summary"] = f"Generation failed: {summary}"
-            else:
-                update_data["summary"] = "Generation failed"
-        
-        result = supabase.table(TABLE_RUNS).update(update_data).eq("id", run_id).execute()
-        
-        if result.data:
+        if success:
             logger.info(f"Updated run {run_id} status to {status}")
             
             # Update last_run_at in project_configs for all completed runs
             if status in [RUN_STATUS_COMPLETE_NO_DIFFS, RUN_STATUS_COMPLETE_WITH_DIFFS, RUN_STATUS_FAILED] and project_id:
-                current_time = datetime.utcnow().isoformat()
-                config_update_result = supabase.table("project_configs").update({
-                    "last_run_at": current_time
-                }).eq("project_id", project_id).execute()
+                current_time = datetime.now(timezone.utc).isoformat()
+                config_success = data_fetcher.update_project_last_run(project_id, current_time)
                 
-                if config_update_result.data:
+                if config_success:
                     logger.info(f"Updated last_run_at for project {project_id}")
                 else:
                     logger.warning(f"Failed to update last_run_at for project {project_id}")
@@ -173,7 +149,7 @@ def update_run_status(run_id: str, status: str, project_id: str, is_scheduled: b
                 
                 # If no URL provided, query the artifacts table for the most recent one
                 if not webhook_url:
-                    webhook_url = get_latest_llms_txt_url(project_id)
+                    webhook_url = get_latest_llms_txt_url(data_fetcher, project_id)
                 
                 # Call webhooks if we have a URL and one of the following conditions apply
                 # 1. This is a manual run

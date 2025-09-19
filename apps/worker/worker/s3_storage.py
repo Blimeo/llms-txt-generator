@@ -14,11 +14,8 @@ from .constants import (
     ENV_AWS_SECRET_ACCESS_KEY,
     S3_BUCKET_NAME,
     S3_REGION,
-    DEFAULT_CONTENT_TYPE,
-    ARTIFACT_TYPE_LLMS_TXT,
-    TABLE_ARTIFACTS
+    DEFAULT_CONTENT_TYPE
 )
-from .database import get_supabase_client
 
 logger = logging.getLogger(__name__)
 
@@ -67,54 +64,3 @@ def upload_content_to_s3(content: str, filename: str) -> Optional[str]:
     return public_url
 
 
-def create_artifact_record(project_id: str, run_id: str, filename: str, 
-                          content: str, public_url: str) -> Optional[str]:
-    """
-    Create an artifact record in the database.
-    
-    Args:
-        project_id: The project ID
-        run_id: The run ID
-        filename: The filename
-        content: The content (used to calculate file size)
-        public_url: The public URL of the uploaded file
-        
-    Returns:
-        Artifact ID if successful, None otherwise
-    """
-    try:
-        supabase = get_supabase_client()
-        
-        # Get file size from content
-        file_size = len(content.encode('utf-8'))
-        
-        # Create artifact record
-        artifact_data = {
-            "project_id": project_id,
-            "run_id": run_id,
-            "type": ARTIFACT_TYPE_LLMS_TXT,
-            "storage_path": f"s3://{S3_BUCKET_NAME}/{filename}",
-            "file_name": filename,
-            "size_bytes": file_size,
-            "metadata": {
-                "public_url": public_url,
-                "bucket": S3_BUCKET_NAME,
-                "key": filename,
-                "uploaded_at": datetime.utcnow().isoformat()
-            }
-        }
-        
-        # Insert artifact
-        artifact_result = supabase.table(TABLE_ARTIFACTS).insert(artifact_data).execute()
-        
-        if artifact_result.data:
-            artifact_id = artifact_result.data[0]['id']
-            logger.info(f"Created artifact record: {artifact_id}")
-            return artifact_id
-        else:
-            logger.error("Failed to create artifact record")
-            return None
-            
-    except Exception as e:
-        logger.error(f"Error creating artifact record: {e}")
-        return None

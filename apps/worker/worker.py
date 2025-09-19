@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from worker.crawler import crawl_with_change_detection
 from worker.llms_generator import generate_llms_text
 from worker.storage import maybe_upload_s3_from_memory, update_run_status
+from worker.data_fetcher import DataFetcher
 from worker.constants import (
     DEFAULT_PORT,
     ENV_PORT,
@@ -92,15 +93,18 @@ def process_job_payload(job: dict):
     job_id = job.get("id")
     url = job.get("url")
     project_id = job.get("projectId")
-    run_id = job.get("runId")  # This should be passed from the API
+    run_id = job.get("runId")
     is_scheduled = job.get("isScheduled", False)  # Whether this is a scheduled job
     is_initial_run = job.get("isInitialRun", False)  # Whether this is the initial run for a new project
     
     if not job_id or not url or not project_id or not run_id:
         raise ValueError("job must contain id+url+project id+run id")
     
+    # Initialize data fetcher for all database operations
+    data_fetcher = DataFetcher()
+    
     # Update run status to IN_PROGRESS
-    update_run_status(run_id, RUN_STATUS_IN_PROGRESS, project_id, is_scheduled, is_initial_run)
+    update_run_status(data_fetcher, run_id, RUN_STATUS_IN_PROGRESS, project_id, is_scheduled, is_initial_run)
 
     # crawl site with change detection
     crawl_opts = {
@@ -114,13 +118,14 @@ def process_job_payload(job: dict):
         url, 
         project_id, 
         run_id, 
+        data_fetcher,
         **crawl_opts
     )
     
     # If no changes detected, we can skip llms.txt generation
     if not crawl_result.get("changes_detected", True):
         logger.info("No changes detected, skipping llms.txt generation")
-        update_run_status(run_id, RUN_STATUS_COMPLETE_NO_DIFFS, project_id, is_scheduled, is_initial_run, "No changes detected, skipping generation")
+        update_run_status(data_fetcher, run_id, RUN_STATUS_COMPLETE_NO_DIFFS, project_id, is_scheduled, is_initial_run, "No changes detected, skipping generation")
         return {
             "s3_url_txt": None,
             "pages_crawled": 0,
@@ -138,7 +143,7 @@ def process_job_payload(job: dict):
     changes_detected = crawl_result.get("changes_detected", True)
     txt_filename = f"{LLMS_TXT_FILENAME_PREFIX}{job_id}{LLMS_TXT_FILENAME_SUFFIX}"
     
-    s3_url_txt = maybe_upload_s3_from_memory(txt_content, txt_filename, run_id, project_id, changes_detected, is_scheduled, is_initial_run)
+    s3_url_txt = maybe_upload_s3_from_memory(data_fetcher, txt_content, txt_filename, run_id, project_id, changes_detected, is_scheduled, is_initial_run)
 
     result = {
         "s3_url_txt": s3_url_txt,

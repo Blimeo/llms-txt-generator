@@ -12,14 +12,12 @@ import xml.etree.ElementTree as ET
 import requests
 from bs4 import BeautifulSoup
 
-from .storage import get_supabase_client
+from .data_fetcher import DataFetcher
 from .constants import (
     DEFAULT_USER_AGENT,
     HEAD_TIMEOUT,
     DEFAULT_TIMEOUT,
-    SITEMAP_NAMESPACE,
-    TABLE_PAGES,
-    TABLE_PAGE_REVISIONS
+    SITEMAP_NAMESPACE
 )
 
 logger = logging.getLogger(__name__)
@@ -34,10 +32,10 @@ class ChangeDetector:
        if changed — enqueue generation via Cloud Tasks for Python workers to process.
     """
     
-    def __init__(self, project_id: str, run_id: str):
+    def __init__(self, project_id: str, run_id: str, data_fetcher: DataFetcher):
         self.project_id = project_id
         self.run_id = run_id
-        self.supabase = get_supabase_client()
+        self.data_fetcher = data_fetcher
         self.session = requests.Session()
         self.session.headers.update({
             "User-Agent": DEFAULT_USER_AGENT
@@ -59,7 +57,7 @@ class ChangeDetector:
         logger.info(f"Found {len(sitemap_urls)} URLs in sitemap")
         
         # Get existing pages from database with their current revisions
-        existing_pages = self._get_existing_pages_with_revisions()
+        existing_pages = self.data_fetcher.get_existing_pages_with_revisions(self.project_id)
         existing_urls = {page['url'] for page in existing_pages}
         logger.info(f"Found {len(existing_pages)} existing pages in database")
         
@@ -166,49 +164,6 @@ class ChangeDetector:
         
         return url
     
-    def _get_existing_pages_with_revisions(self) -> List[Dict]:
-        """Get existing pages from database with their current revision info."""
-        try:
-            # First get all pages
-            result = self.supabase.table(TABLE_PAGES).select(
-                "id, url, path, canonical_url, current_revision_id, last_seen_at, render_mode, is_indexable, metadata"
-            ).eq("project_id", self.project_id).execute()
-            
-            if not result.data:
-                return []
-            
-            pages = result.data
-            
-            # Get current revisions for all pages in a batch
-            page_ids = [page['id'] for page in pages]
-            current_revision_ids = [page['current_revision_id'] for page in pages if page.get('current_revision_id')]
-            
-            revisions = {}
-            if current_revision_ids:
-                rev_result = self.supabase.table(TABLE_PAGE_REVISIONS).select(
-                    "id, page_id, content_sha256, created_at, metadata"
-                ).in_("id", current_revision_ids).execute()
-                
-                if rev_result.data:
-                    for revision in rev_result.data:
-                        revisions[revision['id']] = revision
-            
-            # Attach current revision info to each page and validate URLs
-            for page in pages:
-                current_revision_id = page.get('current_revision_id')
-                if current_revision_id and current_revision_id in revisions:
-                    page['current_revision'] = revisions[current_revision_id]
-                else:
-                    page['current_revision'] = None
-                
-                # Normalize URL to ensure consistent comparison
-                page['url'] = self._normalize_url(page['url'])
-            
-            logger.info(f"Retrieved {len(pages)} pages with revisions")
-            return pages
-        except Exception as e:
-            logger.error(f"Failed to get existing pages with revisions: {e}")
-            return []
     
     def _process_url_batch(self, urls: List[str], existing_pages: List[Dict], sitemap_urls: List[str]) -> Dict[str, List[Dict]]:
         """Process a batch of URLs for change detection."""
@@ -355,33 +310,6 @@ class ChangeDetector:
         
         return text
     
-    def _get_last_revision(self, page_id: str) -> Optional[Dict]:
-        """Get the most recent revision for a page."""
-        try:
-            result = self.supabase.table(TABLE_PAGE_REVISIONS).select("*").eq(
-                "page_id", page_id
-            ).order("created_at", desc=True).limit(1).execute()
-            
-            if result.data:
-                return result.data[0]
-            return None
-        except Exception as e:
-            logger.error(f"Failed to get last revision for page {page_id}: {e}")
-            return None
-    
-    def _get_revision_by_id(self, revision_id: str) -> Optional[Dict]:
-        """Get a specific revision by ID."""
-        try:
-            result = self.supabase.table(TABLE_PAGE_REVISIONS).select("*").eq(
-                "id", revision_id
-            ).execute()
-            
-            if result.data and len(result.data) > 0:
-                return result.data[0]
-            return None
-        except Exception as e:
-            logger.error(f"Failed to get revision {revision_id}: {e}")
-            return None
     
     def _get_page_info(self, url: str) -> Dict:
         """Get basic page info for a URL."""
@@ -410,41 +338,31 @@ class ChangeDetector:
             # Check if content hash has actually changed
             if old_revision_id:
                 # Get the old revision to compare hashes
-                old_revision = self._get_revision_by_id(old_revision_id)
+                old_revision = self.data_fetcher.get_revision_by_id(old_revision_id)
                 if old_revision and old_revision.get('content_sha256') == content_hash:
                     logger.info(f"Page {page_id} content hash unchanged ({content_hash[:8]}...), skipping revision creation")
                     
                     # Update page's last_seen_at but don't create new revision
-                    self.supabase.table(TABLE_PAGES).update({
-                        'last_seen_at': datetime.utcnow().isoformat()
-                    }).eq('id', page_id).execute()
-                    
-                    # Note: Diff records are no longer created
+                    self.data_fetcher.update_page_last_seen(page_id)
                     
                     return old_revision_id  # Return existing revision ID
             
             # Create revision data with minimal metadata
-            revision_data = {
-                'page_id': page_id,
-                'run_id': self.run_id,
-                'content': content,
-                'content_sha256': content_hash,
-                'title': title,
-                'meta_description': description,
-                'metadata': metadata or {}
-            }
+            revision_id = self.data_fetcher.create_page_revision(
+                page_id=page_id,
+                run_id=self.run_id,
+                content=content,
+                content_hash=content_hash,
+                title=title,
+                description=description,
+                metadata=metadata or {}
+            )
             
-            result = self.supabase.table(TABLE_PAGE_REVISIONS).insert(revision_data).execute()
-            
-            if result.data:
-                revision_id = result.data[0]['id']
+            if revision_id:
                 logger.info(f"Saved page revision {revision_id} for page {page_id} with hash {content_hash[:8]}...")
                 
                 # Update page's current_revision_id
-                self.supabase.table(TABLE_PAGES).update({
-                    'current_revision_id': revision_id,
-                    'last_seen_at': datetime.utcnow().isoformat()
-                }).eq('id', page_id).execute()
+                self.data_fetcher.update_page_revision(page_id, revision_id)
                       
                 return revision_id
             else:

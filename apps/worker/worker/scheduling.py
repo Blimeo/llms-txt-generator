@@ -2,15 +2,14 @@
 """Scheduling and cron expression handling."""
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from .constants import (
     CRON_DAILY_2AM,
-    CRON_WEEKLY_SUNDAY_2AM,
-    TABLE_PROJECT_CONFIGS
+    CRON_WEEKLY_SUNDAY_2AM
 )
-from .database import get_supabase_client
+from .data_fetcher import DataFetcher
 from .cloud_tasks_client import get_cloud_tasks_client
 
 logger = logging.getLogger(__name__)
@@ -24,7 +23,7 @@ def calculate_next_run_time(cron_expression: str) -> Optional[datetime]:
     if not cron_expression:
         return None
     
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     # When we support custom schedules, this will use a proper cron expression parsing library.
     if cron_expression == CRON_DAILY_2AM:  # Daily at 2 AM
         next_run = now.replace(hour=2, minute=0, second=0, microsecond=0)
@@ -48,19 +47,15 @@ def schedule_next_run(project_id: str) -> bool:
     This function creates a new run in the database and enqueues the task using Google Cloud Tasks.
     """
     try:
-        supabase = get_supabase_client()
+        data_fetcher = DataFetcher()
         
         # Get project config and domain in a single query by joining tables
-        # Note: We need to construct the URL from the domain field in projects table
-        config_result = supabase.table(TABLE_PROJECT_CONFIGS).select(
-            "cron_expression, is_enabled, next_run_at, projects!inner(domain)"
-        ).eq("project_id", project_id).single().execute()
+        config = data_fetcher.get_project_config_with_domain(project_id)
         
-        if not config_result.data:
+        if not config:
             logger.warning(f"No config found for project {project_id}")
             return False
         
-        config = config_result.data
         if not config.get("is_enabled") or not config.get("cron_expression"):
             logger.info(f"Project {project_id} has scheduling disabled or no cron expression")
             return False
@@ -78,17 +73,12 @@ def schedule_next_run(project_id: str) -> bool:
             return False
         
         # Create a new run in the database with QUEUED status
-        run_result = supabase.table("runs").insert({
-            "project_id": project_id,
-            "status": "QUEUED",
-            "created_at": datetime.utcnow().isoformat()
-        }).execute()
+        new_run_id = data_fetcher.create_run(project_id)
         
-        if not run_result.data:
+        if not new_run_id:
             logger.error(f"Failed to create new run for project {project_id}")
             return False
         
-        new_run_id = run_result.data[0]["id"]
         logger.info(f"Created new run {new_run_id} for project {project_id}")
         
         # Create job payload for Cloud Tasks
@@ -117,13 +107,10 @@ def schedule_next_run(project_id: str) -> bool:
         print(task_name)
         
         # Update project config with next run time and task name in a single operation
-        current_time = datetime.utcnow().isoformat()
-        update_result = supabase.table(TABLE_PROJECT_CONFIGS).update({
-            "last_run_at": current_time,
-            "next_run_at": next_run_time.isoformat(),
-        }).eq("project_id", project_id).execute()
+        current_time = datetime.now(timezone.utc).isoformat()
+        update_success = data_fetcher.update_project_next_run(project_id, current_time, next_run_time.isoformat())
         
-        if not update_result.data:
+        if not update_success:
             logger.error(f"Failed to update next run time for project {project_id}")
             return False
         

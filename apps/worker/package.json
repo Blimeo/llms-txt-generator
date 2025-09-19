@@ -8,6 +8,7 @@
     "dev": "uv run worker.py",
     "lint": "echo 'no lint configured for python'",
     "docker:build": "docker build -t yourorg/worker:latest .",
-    "build": "echo 'no build for python worker'"
+    "build": "echo 'no build for python worker'",
+    "test": "uv run run_tests.py"
   }
 }

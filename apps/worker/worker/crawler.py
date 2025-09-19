@@ -11,15 +11,14 @@ import requests
 from bs4 import BeautifulSoup
 
 from .change_detection import ChangeDetector
-from .storage import get_supabase_client
+from .data_fetcher import DataFetcher
 from .constants import (
     DEFAULT_USER_AGENT,
     HTML_CONTENT_TYPES,
     DEFAULT_MAX_PAGES,
     DEFAULT_MAX_DEPTH,
     DEFAULT_CRAWL_DELAY,
-    DEFAULT_TIMEOUT,
-    TABLE_PAGES
+    DEFAULT_TIMEOUT
 )
 
 logger = logging.getLogger(__name__)
@@ -119,7 +118,15 @@ def normalize_url(base: str, link: str) -> Optional[str]:
 
 
 def is_same_domain(seed: str, url: str) -> bool:
-    return urlparse(seed).netloc == urlparse(url).netloc
+    """Check if two URLs are from the same domain, ignoring ports."""
+    seed_parsed = urlparse(seed)
+    url_parsed = urlparse(url)
+    
+    # Extract hostname without port
+    seed_hostname = seed_parsed.hostname
+    url_hostname = url_parsed.hostname
+    
+    return seed_hostname == url_hostname
 
 
 def extract_text_and_meta(html: str, url: str) -> Dict[str, Any]:
@@ -137,34 +144,17 @@ def extract_text_and_meta(html: str, url: str) -> Dict[str, Any]:
     return {"title": title, "description": meta_desc}
 
 
-def _create_page_record(project_id: str, page_info: Dict) -> Optional[str]:
+def _create_page_record(data_fetcher: DataFetcher, project_id: str, page_info: Dict) -> Optional[str]:
     """Create a new page record in the database."""
     try:
-        from .storage import get_supabase_client
-        from datetime import datetime
+        page_id = data_fetcher.create_page_record(project_id, page_info)
         
-        supabase = get_supabase_client()
-        
-        page_data = {
-            'project_id': project_id,
-            'url': page_info['url'],
-            'path': page_info.get('path', '/'),
-            'canonical_url': page_info.get('canonical_url', page_info['url']),
-            'render_mode': page_info.get('render_mode', 'STATIC'),
-            'is_indexable': page_info.get('is_indexable', True),
-            'discovered_at': datetime.utcnow().isoformat(),
-            'metadata': page_info.get('metadata', {})
-        }
-        
-        result = supabase.table(TABLE_PAGES).insert(page_data).execute()
-        
-        if result.data:
-            page_id = result.data[0]['id']
+        if page_id:
             logger.info(f"Created new page record {page_id} for {page_info['url']}")
-            return page_id
         else:
             logger.error(f"Failed to create page record for {page_info['url']}")
-            return None
+        
+        return page_id
             
     except Exception as e:
         logger.error(f"Error creating page record for {page_info['url']}: {e}")
@@ -175,6 +165,7 @@ def crawl_with_change_detection(
     start_url: str,
     project_id: str,
     run_id: str,
+    data_fetcher: DataFetcher,
     max_pages: int = DEFAULT_MAX_PAGES,
     max_depth: int = DEFAULT_MAX_DEPTH,
     delay: float = DEFAULT_CRAWL_DELAY,
@@ -189,8 +180,8 @@ def crawl_with_change_detection(
         session = requests.Session()
     session.headers.update({"User-Agent": user_agent})
 
-    # Initialize change detector
-    change_detector = ChangeDetector(project_id, run_id)
+    # Initialize change detector with data fetcher
+    change_detector = ChangeDetector(project_id, run_id, data_fetcher)
     
     # Detect changes first
     changes = change_detector.detect_changes(start_url)
@@ -236,7 +227,7 @@ def crawl_with_change_detection(
             
             if not page_id:
                 # This is a new page, we need to create it first
-                page_id = _create_page_record(project_id, page_info)
+                page_id = _create_page_record(data_fetcher, project_id, page_info)
                 old_revision_id = None  # New page has no old revision
             
             if page_id:

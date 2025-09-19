@@ -37,6 +37,9 @@ dist/
 
 # Python-generated files
 __pycache__/
+.pytest_cache/
+htmlcov/
+*.egg-info/
 *.py[cod]
 build/
 dist/

@@ -19,7 +19,7 @@ from .change_detection import ChangeDetector
 from .llms_generator import generate_llms_text
 from .storage import update_run_status, maybe_upload_s3_from_memory
 from .database import get_supabase_client
-from .s3_storage import upload_content_to_s3, create_artifact_record
+from .s3_storage import upload_content_to_s3
 from .webhooks import call_webhooks_for_project
 from .scheduling import schedule_next_run, calculate_next_run_time
 from .cloud_tasks_client import get_cloud_tasks_client
@@ -33,7 +33,6 @@ __all__ = [
     "update_run_status",
     "maybe_upload_s3_from_memory",
     "upload_content_to_s3",
-    "create_artifact_record",
     "call_webhooks_for_project",
     "schedule_next_run",
     "calculate_next_run_time",

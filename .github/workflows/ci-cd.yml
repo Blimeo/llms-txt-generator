@@ -66,9 +66,19 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
 
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
       - name: Install dependencies (root)
         run: |
           npm ci
+
+      - name: Install Python dependencies (worker)
+        run: |
+          cd apps/worker
+          uv sync
 
       - name: Run build (monorepo)
         run: |
