@@ -45,6 +45,8 @@ export default function ProjectDetailPage() {
   const handleSignOut = async () => {
     await supabase.auth.signOut()
     setUser(null)
+    // Redirect to home page after signing out
+    window.location.href = '/'
   }
 
   const fetchProject = useCallback(async () => {
