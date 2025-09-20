@@ -41,20 +41,11 @@ END$$;
 -- Artifact types for generated outputs:
 --   LLMS_TXT : the generated llms.txt textual artifact
 --   JSON     : JSON export of the llms.txt structured data
---   ZIP      : zipped bundle (pages + reports)
 --   OTHER    : miscellaneous
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'artifact_type') THEN
-    CREATE TYPE artifact_type AS ENUM ('LLMS_TXT', 'JSON', 'ZIP', 'OTHER');
-  END IF;
-END$$;
-
--- Priority for crawl jobs
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'crawl_priority') THEN
-    CREATE TYPE crawl_priority AS ENUM ('LOW','NORMAL','HIGH','CRITICAL');
+    CREATE TYPE artifact_type AS ENUM ('LLMS_TXT', 'JSON', 'OTHER');
   END IF;
 END$$;
 

@@ -1,6 +1,6 @@
 # LLMs.txt Crawler
 
-A comprehensive web application and worker system that automatically generates and maintains `llms.txt` files for websites based on the standard described at llmstxt.org. The system monitors website changes and outputs a structured text artifact optimized for LLM consumption.
+A comprehensive web application and worker system that automatically generates and maintains `llms.txt` files for *static sites* based on the standard described at llmstxt.org. The system monitors website changes and outputs a structured text artifact optimized for LLM consumption.
 
 ## Quickstart
 
@@ -81,7 +81,7 @@ The worker is a Python-based HTTP server deployed on Google Cloud Run that handl
 - **`webhooks.py`**: Webhook management and execution
 - **`cloud_tasks_client.py`**: Google Cloud Tasks integration
 
-## Setup Instructions
+## Local Setup and Deployment
 
 ### Prerequisites
 
@@ -174,7 +174,7 @@ npm run dev
 uv run worker.py
 ```
 
-The worker will start an HTTP server on port 8080 (configurable via `PORT` environment variable).
+The worker will start an HTTP server on port 8080 (configurable via the `PORT` environment variable). Because our frontend will send tasks to Cloud Tasks which cannot reach our local worker, for local development we must curl POST requests to our locally running worker instead of using the frontend. (A possible future improvement to reduce development friction is to expose the local worker with a tunnel using a tool like `ngrok`.)
 
 ## Dependencies
 
