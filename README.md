@@ -1,6 +1,8 @@
 # LLMs.txt Crawler
 
-A comprehensive web application and worker system that automatically generates and maintains `llms.txt` files for *static sites* based on the standard described at llmstxt.org. The system monitors website changes and outputs a structured text artifact optimized for LLM consumption.
+A comprehensive web application and worker system that automatically generates and maintains `llms.txt` files for **static sites** based on the standard described at llmstxt.org. The system monitors website changes and outputs a structured text artifact optimized for LLM consumption.
+
+**Important caveat: the tool currently only works with static sites. Try some of the sites [here](https://jekyllrb.com/showcase/). In addition, to save on Google Cloud compute costs, the demo crawls a maximum of 100 URLs.** 
 
 ## Quickstart
 
