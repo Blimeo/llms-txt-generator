@@ -13,6 +13,14 @@ Visit the live demo at https://llms-txt-generator.vercel.app/
 - When the worker detects new pages or page metadata changes compared to previous crawls, a new version of the llms.txt will be generated. Runs will automatically be executed with the frequency specified in the project configuration, but they can also be manually triggered on the project detail page.
 - Add outgoing webhooks to receive a link to the updated llms.txt every time a run (manual or automated) generates a new version. Individual webhooks can be disabled or deleted.
 
+## Screenshots
+
+![Project List Page](screenshots/project_list_page.png)
+*The main dashboard showing all your monitoring projects with status and quick actions*
+
+![Project Detail Page](screenshots/project_detail_page.png)
+*Detailed view of a specific project showing run history, configuration, and generated files*
+
 ## Overview
 
 The LLMs.txt Crawler consists of two main components:

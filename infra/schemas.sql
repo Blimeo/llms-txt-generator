@@ -148,14 +148,7 @@ CREATE TABLE IF NOT EXISTS page_revisions (
   content_sha256 text,
   title text,
   meta_description text,
-  canonical text,
-  extracted_jsonld jsonb,
-  headings text[],
-  internal_links integer DEFAULT 0,
-  external_links integer DEFAULT 0,
-  word_count integer DEFAULT 0,
   created_at timestamptz NOT NULL DEFAULT now(),
-  processed boolean NOT NULL DEFAULT false,
   metadata jsonb DEFAULT '{}'::jsonb
 );
 CREATE INDEX IF NOT EXISTS idx_page_revisions_page ON page_revisions(page_id);
