@@ -207,7 +207,26 @@ def crawl_with_change_detection(
     pages_to_crawl = changes['changed_pages'] + changes['new_pages']
     crawled_pages = []
     
-    for page_info in pages_to_crawl[:max_pages]:
+    # Ensure start_url is always included if it's in the pages to crawl
+    # This is important for LLMS generator to create accurate headers
+    start_url_included = False
+    pages_to_crawl_with_priority = []
+    
+    # First, add the start_url if it's in the pages to crawl
+    for page_info in pages_to_crawl:
+        if page_info['url'] == start_url:
+            pages_to_crawl_with_priority.append(page_info)
+            start_url_included = True
+            break
+    
+    # Then add the rest of the pages up to max_pages limit
+    remaining_slots = max_pages - (1 if start_url_included else 0)
+    for page_info in pages_to_crawl:
+        if page_info['url'] != start_url and remaining_slots > 0:
+            pages_to_crawl_with_priority.append(page_info)
+            remaining_slots -= 1
+    
+    for page_info in pages_to_crawl_with_priority:
         url = page_info['url']
         logger.info(f"Crawling changed/new page: {url}")
         

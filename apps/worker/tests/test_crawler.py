@@ -338,6 +338,55 @@ class TestCrawlerBusinessLogic:
         assert result["pages_crawled"] <= 10
         assert result["max_pages"] == 10
 
+    @patch('worker.crawler.ChangeDetector')
+    @patch('worker.crawler.requests.Session')
+    def test_crawl_with_change_detection_start_url_priority(self, mock_session_class, mock_change_detector_class, mock_data_fetcher):
+        """Test that start_url is always included even when max_pages would exclude it."""
+        # Mock session and response
+        mock_session = Mock()
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.text = "<html><head><title>Test Page</title></head><body>Content</body></html>"
+        mock_session.get.return_value = mock_response
+        mock_session_class.return_value = mock_session
+        
+        # Mock change detector with start_url at the end of the list
+        mock_detector = Mock()
+        mock_detector.detect_changes.return_value = {
+            "has_changes": True,
+            "changed_pages": [
+                {"id": f"page_{i}", "url": f"https://example.com/page{i}"}
+                for i in range(10)  # 10 pages before start_url
+            ] + [
+                {"id": "start_page", "url": "https://example.com"}  # start_url at the end
+            ],
+            "new_pages": [],
+            "unchanged_pages": []
+        }
+        mock_detector.save_page_revision.return_value = "revision_789"
+        mock_change_detector_class.return_value = mock_detector
+        
+        result = crawl_with_change_detection(
+            start_url="https://example.com",
+            project_id="project_123",
+            run_id="run_456",
+            data_fetcher=mock_data_fetcher,
+            max_pages=5,  # Limit to 5 pages, but start_url should still be included
+            max_depth=2,
+            delay=0.5
+        )
+        
+        # Should process max_pages pages (start_url gets priority and takes one slot)
+        assert result["pages_crawled"] == 5  # 5 pages total, with start_url prioritized
+        assert result["max_pages"] == 5
+        
+        # Verify that the start_url was crawled by checking the crawled pages
+        crawled_urls = [page["url"] for page in result["pages"]]
+        assert "https://example.com" in crawled_urls
+        
+        # Verify that start_url is crawled first (has priority)
+        assert crawled_urls[0] == "https://example.com"
+
     def test_crawl_with_change_detection_custom_session(self, mock_data_fetcher):
         """Test crawl with custom session provided."""
         custom_session = Mock()
