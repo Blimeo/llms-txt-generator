@@ -89,6 +89,7 @@ def schedule_next_run(project_id: str) -> bool:
             "url": domain,
             "priority": "scheduled",
             "render_mode": "scheduled",
+            "isScheduled": True,
             "scheduledAt": int(next_run_time.timestamp() * 1000),  # Convert to milliseconds
             "runId": new_run_id,
             "metadata": {

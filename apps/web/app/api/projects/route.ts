@@ -189,7 +189,7 @@ export async function POST(req: NextRequest) {
           // Enqueue job for immediate execution via Cloud Tasks
           await enqueueImmediateJob({
             id: jobId,
-            url: project.domain,
+            url: project.domain,  
             projectId: project.id,
             runId: run.id,
             priority: 'NORMAL',
